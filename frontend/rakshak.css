@@ -1,10 +1,23 @@
 /* RAKSHAK additions on top of styles.css (same tokens). */
 :root{--red:#b8321f;--red-bg:#fbe9e5;--ok:#1d6b4b;--sage:#8fa89a}
+.sidebar{overflow:hidden}
 .skip-link{position:absolute;left:-999px;top:0;background:#fff;padding:8px 12px;z-index:100}.skip-link:focus{left:8px;top:8px}
 :focus-visible{outline:2px solid #2f8f67;outline-offset:2px}
-.nav-group{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#6f9884;font-weight:700;padding:14px 12px 4px}
+.nav-group{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#78a792;font-weight:700;padding:0 12px 10px}
 a.nav-item{text-decoration:none}
-.nav{overflow-y:auto;max-height:calc(100vh - 250px);margin-top:8px}
+.nav{overflow-y:auto;overflow-x:hidden;max-width:100%;max-height:calc(100vh - 250px);margin-top:8px;gap:0}
+.nav-section{display:grid;gap:6px;min-width:0;max-width:100%}
+.nav-section-ar{margin-top:26px;padding-top:22px;border-top:1px solid rgba(185,237,205,.14)}
+.nav-item{position:relative;width:100%;min-width:0;min-height:46px;padding:11px 12px;border:1px solid transparent;transition:background .18s ease,border-color .18s ease,transform .18s ease}
+.nav-item:hover{transform:translateX(2px)}
+.nav-item-external{background:rgba(185,237,205,.07);border-color:rgba(185,237,205,.1);color:#d8eee1}
+.nav-item-external:hover{background:rgba(185,237,205,.13);border-color:rgba(185,237,205,.2)}
+.nav-item .nav-icon{width:18px;display:inline-grid;place-items:center;flex:0 0 18px;color:#9bd5b4;font-size:16px;line-height:1}
+.nav-item .nav-label{width:auto;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-item .nav-arrow{width:auto;margin-left:auto;color:#8ebfa4;font-size:15px;line-height:1}
+.nav-section-ar .nav-item{color:#abc4b6}
+.nav-section-ar .nav-item:hover,.nav-section-ar .nav-item.active{background:#285442;color:#fff}
+.nav-section-ar .nav-item.active{border-color:rgba(185,237,205,.12)}
 .topbar-left{display:flex;align-items:center;gap:12px}.menu-btn{display:none}
 .live-chip.bad{background:var(--red-bg);border-color:#f0c5bc;color:var(--red)}.live-chip.bad .pulse{background:var(--red);box-shadow:0 0 0 4px #f5d3cc}
 .banner{background:var(--amber-bg);border:1px solid #f0d6ad;color:#7a4a10;border-radius:10px;padding:10px 14px;margin:16px 0 0;font-size:13px}

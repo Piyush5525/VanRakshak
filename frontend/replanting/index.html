@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b100c">
+<title>VanRakshak · Replanting intelligence</title>
+<meta name="description" content="Plan forest restoration with climate, soil, native-range, growth and carbon evidence inside VanRakshak.">
+<meta property="og:title" content="VanRakshak">
+<meta property="og:description" content="Desenhe uma área em qualquer lugar do mundo e veja o que plantar, quanto rende e como cresce.">
+<meta property="og:image" content="/assets/public/logo.svg">
+<meta property="og:url" content="/replanting/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/assets/public/logo.svg">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+</head>
+<body>
+<div id="map"></div>
+
+<header class="bar">
+  <div class="brand" role="button" tabindex="0" style="cursor:pointer">
+    <img src="assets/logo.png" alt="" width="20" height="20" style="border-radius:5px">
+    <span>VanRakshak</span>
+  </div>
+  <div class="search">
+    <input id="geo-input" type="search" placeholder="Search a city or place" autocomplete="off" spellcheck="false">
+    <ul id="geo-results" hidden></ul>
+  </div>
+  <button id="draw-btn" title="Draw an area to analyze">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="4 3"/></svg>
+    <span id="draw-label">Draw area</span>
+  </button>
+  <button id="radar-btn" title="Find plantable land">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="7"/><path d="m21 21-5-5"/><path d="M10.5 13.5V9.8c0-1.8 1.4-3.3 3.2-3.3-.1 1.9-1.5 3.3-3.2 3.3zm0 0c0-1.5-1.2-2.7-2.7-2.7 0 1.5 1.2 2.7 2.7 2.7z" fill="currentColor" stroke="none"/></svg>
+    <span id="radar-label"></span>
+  </button>
+  <button id="import-btn" title="Import area">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 11v6"/><path d="m9 14 3 3 3-3"/></svg>
+    <span id="import-label"></span>
+  </button>
+  <input id="import-input" type="file" accept=".geojson,.json,.kml,.zip" hidden>
+  <button id="lang-btn" title="Idioma / Language"></button>
+  <div id="langmenu" hidden></div>
+</header>
+
+<div id="about" hidden></div>
+
+<div id="proj" hidden></div>
+
+<div id="hint" hidden>Click to drop points &middot; right-click, double-click or click the first point to close &middot; Esc cancels</div>
+
+<aside id="panel" hidden>
+  <div class="sheet-grab" aria-hidden="true"><i></i></div>
+  <div id="panel-content"></div>
+</aside>
+
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

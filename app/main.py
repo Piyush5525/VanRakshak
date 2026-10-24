@@ -44,6 +44,7 @@ from app.forest_routes import api as forest_api
 from app.factory_routes import api as factory_api
 from app.live_routes import api as live_api
 from app.rakshak_routes import api as rakshak_api
+from app.replanting_routes import router as replanting_api
 from app.ops_routes import api as ops_api, notifier, router_service
 from app.services.notify import real_sends_enabled
 from app.services.providers import FIRMSProvider, SatelliteProvider
@@ -95,6 +96,7 @@ app.include_router(live_api)
 app.include_router(fire_api)
 app.include_router(forest_api)
 app.include_router(factory_api)
+app.include_router(replanting_api)
 app.add_middleware(RequestContextMiddleware, per_minute=settings.rate_limit_per_minute)
 
 
@@ -560,9 +562,13 @@ frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 if frontend_dir.exists():
     app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
 
+    replanting_dir = frontend_dir / "replanting"
+    if replanting_dir.exists():
+        app.mount("/replanting", StaticFiles(directory=replanting_dir, html=True), name="replanting")
+
     @app.get("/", include_in_schema=False)
     def landing():
-        return FileResponse(frontend_dir / "landing.html")
+        return FileResponse(frontend_dir / "live.html")
 
     @app.get("/live", include_in_schema=False)
     def live_map():

@@ -77,14 +77,16 @@ def test_every_page_renders_without_script_errors_on_an_empty_database(server, b
     ctx.close()
 
 
-def test_landing_and_console_routes(server, browser):
+def test_root_opens_live_map_and_console_route(server, browser):
     page = browser.new_page()
     page.goto(server + "/", wait_until="load")
-    assert "VanRakshak" in page.title() and page.locator("a.primary").count() == 1 and page.locator("a.ghost").count() == 1
-    page.click("a.ghost")
+    assert "VanRakshak" in page.title() and page.locator("#map").count() == 1
+    page.goto(server + "/app", wait_until="load")
     page.wait_for_url("**/app")
     page.wait_for_selector("#nav .nav-item")
-    assert page.locator("#nav .nav-item").count() == 16  # 15 pages + the Live map link
+    assert page.locator("#nav .nav-item").count() == 4  # Live map + Replanting intelligence + 2 AR tools
+    assert page.locator('#nav a[href="/replanting/"]').count() == 1
+    assert page.locator('.nav-group').inner_text() == 'AR tools'
     page.close()
 
 

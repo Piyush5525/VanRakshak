@@ -16,7 +16,11 @@ copy .env.example .env        # then add the keys you have (see below)
 uvicorn app.main:app --port 8000
 ```
 
-Open <http://localhost:8000> and press **Open live map** (or go straight to `/live`). The full console is at `/app`, API docs at `/docs`.
+Open <http://localhost:8000> to go directly to the live map. The integrated **Replanting intelligence** workspace is at `/replanting/`. The full console is at `/app`, API docs at `/docs`.
+
+The replanting workspace is bundled under `frontend/replanting/` with its scoring engine,
+species data and assets. It is served by VanRakshak and does not depend on the separate
+`replantio` folder being present.
 
 ## The live map
 

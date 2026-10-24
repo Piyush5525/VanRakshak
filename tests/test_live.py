@@ -94,8 +94,11 @@ def test_mark_incident_add_site_and_report_carries_user_entered_data_with_labels
 
 
 def test_pages_are_served_and_boundary_helper_contains_points(tmp_path, monkeypatch):
-    assert "Open live map" in client.get("/").text and "VanRakshak" in client.get("/live").text
+    assert 'id="map"' in client.get("/").text and "VanRakshak" in client.get("/live").text
     assert client.get("/assets/public/logo.svg").status_code == 200
+    replanting = client.get("/replanting/")
+    assert replanting.status_code == 200 and "Replanting intelligence" in replanting.text
+    assert client.get("/replanting/data/species.json").status_code == 200
     f = tmp_path / "india.geojson"
     f.write_text(json.dumps({"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[70, 8], [90, 8], [90, 30], [70, 30], [70, 8]]]}, "properties": {}}))
     monkeypatch.setattr(boundary, "_path", lambda: f)

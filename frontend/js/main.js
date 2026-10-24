@@ -18,15 +18,20 @@ export const PAGES = [
   { id: 'settings', title: 'Settings & Admin', group: 'System', icon: '⚙' },
 ];
 
+const NAV_PAGES = PAGES.filter((page) => page.group === 'AR');
+
 let current = null;
 
 function buildNav() {
-  let last = '';
-  $('#nav').innerHTML = '<a class="nav-item" href="/live"><span>◉</span> Live map ↗</a>' + PAGES.map((p) => {
-    const g = p.group !== last ? `<div class="nav-group">${esc(p.group)}</div>` : '';
-    last = p.group;
-    return `${g}<a class="nav-item" href="#/${p.id}" data-page="${p.id}"><span>${p.icon}</span> ${esc(p.title)}${p.badge ? ' <b id="badge-' + p.id + '" hidden>0</b>' : ''}</a>`;
-  }).join('');
+  $('#nav').innerHTML = `
+    <div class="nav-section nav-section-primary">
+      <a class="nav-item nav-item-external" href="/live"><span class="nav-icon">◉</span><span class="nav-label">Live map</span><span class="nav-arrow">↗</span></a>
+      <a class="nav-item nav-item-external" href="/replanting/"><span class="nav-icon">✦</span><span class="nav-label">Replanting intelligence</span><span class="nav-arrow">↗</span></a>
+    </div>
+    <div class="nav-section nav-section-ar">
+      <div class="nav-group">AR tools</div>
+      ${NAV_PAGES.map((p) => `<a class="nav-item" href="#/${p.id}" data-page="${p.id}"><span class="nav-icon">${p.icon}</span><span class="nav-label">${esc(p.title.replace(/^AR\s+/, ''))}</span></a>`).join('')}
+    </div>`;
 }
 
 async function route() {
