@@ -73,8 +73,8 @@ def test_one_decision_per_spot_permits_with_exact_details_and_everything_can_be_
     page.wait_for_selector("#fcEsc")
     assert page.locator(".pin.tree").count() == 1
     text = page.inner_text("#forestBody")
-    assert "No permit in the register covers this spot" in text and "not proof that the work is illegal" in text
-    assert "tree cover over time" in text.lower() and text.lower().count("illegal") == 1
+    assert "Not government approved" in text and "No permit found for this spot" in text
+    assert "tree cover over time" in text.lower() and "illegal" not in text.lower()
     assert page.locator("#fcEsc").count() == 1 and page.locator("#fcFalse").count() == 1
     assert page.locator("#cat, #stat, #send, .chn").count() == 0       # the old multi-option controls are gone
     page.click("#snap button[data-s='90']")
@@ -94,7 +94,7 @@ def test_one_decision_per_spot_permits_with_exact_details_and_everything_can_be_
     assert "FC/2026/114" in permit and "State Forest Department" in permit and "Quarry access road" in permit and "Issued" in permit and "Open the source document" in permit
     assert page.get_attribute(".permit a", "href") == "https://example.gov.in/permits/114"
     page.click("[data-rm]")
-    page.wait_for_selector(".banner2.red")
+    page.wait_for_selector(".pstat.no")
     assert page.locator(".permit").count() == 0
     # Escalate asks once more, then runs the whole routing with a live card; nothing is configured here, so it says so
     page.click("#fcEsc")

@@ -137,5 +137,9 @@ def report(cid: str, role: Role = Depends(require_roles(*READ))):
         ("Limits", res["notice"]),
     ]
     audit(role.value, "factory_report_downloaded", "factory_check", cid, {})
-    pdf = generic_pdf(f"Factory impact screening: {i['name']}", "Screening estimate from open data", blocks)
+    from app.services.reports import _static_map
+
+    pdf = generic_pdf(f"Factory impact screening: {i['name']}", f"{i['kind_label']} · screening estimate from open data", blocks,
+                      summary=[("Forest on site", f"{s['forest_in_footprint_ha']} ha"), ("Within 300 m", f"{s['edge_zone_forest_ha']} ha"), ("Within 3 km", f"{s['forest_within_3km_ha']} ha" if 'forest_within_3km_ha' in s else "–")],
+                      links=[("Open in Google Maps", f"https://www.google.com/maps?q={s['lat']},{s['lon']}")], image=_static_map(s["lat"], s["lon"], 14), caption=f"Satellite view of the site, {s['lat']:.5f}, {s['lon']:.5f}")
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="factory-check-{cid[:8]}.pdf"'})

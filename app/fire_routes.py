@@ -479,6 +479,85 @@ def load_scenarios(role: Role = Depends(require_roles(*CREATE))):
     return {"incidents": made, "created": len(ids), "job_id": job}
 
 
+PAST_WINDOWS = ["2026-03-12", "2026-04-02", "2026-02-20", "2026-03-25"]   # dry-season days, five-day windows of the NASA archive
+INDIA = (68.0, 6.5, 97.5, 35.5)
+
+
+def _past_hotspots() -> list[dict[str, Any]]:
+    """Real hotspots from NASA's archived (standard-product) VIIRS feed: the strongest, high-confidence ones, spread across India."""
+    import httpx
+
+    from app.services import boundary
+    from app.services.wildfire import FirmsUnavailable, parse_firms_csv
+    from app.services.routing import haversine_km
+
+    if not settings.firms_api_key:
+        raise FirmsUnavailable("FIRMS_API_KEY is not configured")
+    rows: list[dict[str, Any]] = []
+    for day in PAST_WINDOWS:
+        url = f"{settings.firms_base_url}/{settings.firms_api_key}/VIIRS_SNPP_SP/{INDIA[0]},{INDIA[1]},{INDIA[2]},{INDIA[3]}/5/{day}"
+        try:
+            r = httpx.get(url, timeout=90)
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise FirmsUnavailable(f"NASA archive request failed: {type(exc).__name__}") from exc
+        if r.text.lstrip().lower().startswith(("invalid", "error")):
+            raise FirmsUnavailable("NASA rejected the request (check the MAP_KEY and its quota)")
+        rows += [x for x in parse_firms_csv(r.text, "VIIRS_SNPP_SP") if (x.get("confidence") or 0) >= 0.9 and x.get("frp_mw") and boundary.contains(x["lat"], x["lon"])]
+    rows.sort(key=lambda x: -x["frp_mw"])
+    picked: list[dict[str, Any]] = []
+    for x in rows:
+        if all(haversine_km([x["lon"], x["lat"]], [y["lon"], y["lat"]]) > 60 for y in picked):
+            picked.append(x)
+        if len(picked) == 10:
+            break
+    return picked
+
+
+def _past_pipeline(ids: list[str]) -> None:
+    for iid in ids:
+        inc = fireops.get(iid)
+        try:
+            firestations.discover(inc["lat"], inc["lon"], 60, iid, False)
+            firestations.compute_route(iid, router_service)
+        except Exception as exc:  # noqa: BLE001 - one failing incident must not stop the rest
+            fireops.log_event(iid, "past_prepare_failed", "workflow", "failed", f"Could not prepare the route: {exc}", error=str(exc)[:200])
+
+
+@api.post("/past/load")
+def load_past(role: Role = Depends(require_roles(*CREATE))):
+    """Add real fires that already happened (from NASA's archive) so there is something to look at between live fires."""
+    from app.services import geoinfo
+    from app.services.wildfire import FirmsUnavailable
+
+    try:
+        spots = _past_hotspots()
+    except FirmsUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    made, ids = [], []
+    for h in spots:
+        obs = h["observed_at"].isoformat()
+        det = {"source": "NASA FIRMS archive", "product": "VIIRS_SNPP_SP", "product_name": "VIIRS S-NPP archive (standard product)", "satellite": h.get("satellite"), "confidence": h["confidence"], "frp_mw": h["frp_mw"], "observed_at": obs, "currency": "archive", "archive": True,
+               "place": geoinfo.place(h["lat"], h["lon"]), "hotspot_history": [{"lat": h["lat"], "lon": h["lon"], "observed_at": obs, "frp_mw": h["frp_mw"]}], "note": "A real fire seen by NASA satellites on " + obs[:10] + "; shown as a past example."}
+        inc, created = fireops.create("nasa_firms", h["lat"], h["lon"], obs, det, role.value, source_detection_id=f"VIIRS_SNPP_SP:{obs}:{h['lat']}:{h['lon']}")
+        made.append(public_incident(inc))
+        if created:
+            ids.append(inc["id"])
+    job = jobs.submit("past_fires", lambda: _past_pipeline(ids)) if ids else None
+    return {"incidents": made, "created": len(ids), "job_id": job}
+
+
+@api.post("/past/remove")
+def remove_past(role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER, Role.OFFICER))):
+    """Remove only the past-fire examples; incidents from live fires are never touched."""
+    with connection() as conn:
+        ids = [i["id"] for i in fireops.list_incidents(True, 1000) if (i.get("detection") or {}).get("archive")]
+        for i in ids:
+            conn.execute("DELETE FROM fire_events WHERE incident_id = ?", (i,))
+            conn.execute("DELETE FROM fire_incidents WHERE id = ?", (i,))
+    return {"removed": len(ids)}
+
+
 @api.get("/incidents/{iid}/ivr/script")
 def ivr_script(iid: str, role: Role = Depends(require_roles(*READ))):
     """The exact words a call would speak, so the operator can read or hear them first."""

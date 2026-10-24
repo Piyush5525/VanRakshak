@@ -160,30 +160,111 @@ def build_report(incident_id: str, settings: Settings, actor: str) -> dict:
     return {"id": report_id, "pdf_id": pdf_id, "incident_id": incident_id, "package_sha256": package_sha, "artifacts": [{"format": "json", "id": report_id}, {"format": "pdf", "id": pdf_id}], "status": "generated"}
 
 
-def generic_pdf(title: str, subtitle: str, blocks: list[tuple[str, Any]]) -> bytes:
-    """Simple structured PDF used by environment, projection and site reports."""
-    styles = getSampleStyleSheet()
-    esc = lambda v: str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")[:900]  # noqa: E731
-    story: list[Any] = [Paragraph(esc(title), styles["Title"]), Paragraph(esc(subtitle), styles["Heading3"]), Paragraph(esc(DISCLAIMER), styles["Italic"]), Spacer(1, 5 * mm)]
-    for heading, body in blocks:
-        story.append(Paragraph(esc(heading), styles["Heading3"]))
-        if isinstance(body, dict):
-            rows = [[Paragraph(f"<b>{esc(k)}</b>", styles["BodyText"]), Paragraph(esc(v), styles["BodyText"])] for k, v in body.items() if v not in (None, "", [], {})]
+GREEN, DARK, SOFT, LINE = colors.HexColor("#0f7a4a"), colors.HexColor("#123524"), colors.HexColor("#eef5f0"), colors.HexColor("#d5e0d9")
+
+
+def _flat(v: Any) -> str:
+    """Show nested data as a short readable line instead of a Python dict."""
+    if isinstance(v, dict):
+        return "; ".join(f"{k}: {_flat(x)}" for k, x in v.items() if x not in (None, "", [], {}))
+    if isinstance(v, (list, tuple)):
+        return ", ".join(_flat(x) for x in v)
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    return str(v)
+
+
+def _static_map(lat: float, lon: float, zoom: int = 15, w: int = 640, h: int = 340) -> bytes | None:
+    """Satellite picture of the place with a pin (Mapbox static images). None when there is no key or the request fails."""
+    from app.core.config import get_settings
+    import httpx
+
+    token = get_settings().mapbox_api
+    if not token:
+        return None
+    try:
+        r = httpx.get(f"https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/pin-l+d7263d({lon},{lat})/{lon},{lat},{zoom},0/{w}x{h}@2x?access_token={token}", timeout=30)
+        return r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image") else None
+    except httpx.HTTPError:
+        return None
+
+
+def generic_pdf(title: str, subtitle: str, blocks: list[tuple[str, Any]], summary: list[tuple[str, str]] | None = None, links: list[tuple[str, str]] | None = None, image: bytes | None = None, caption: str | None = None, images: list[tuple[bytes, str]] | None = None) -> bytes:
+    """Branded A4 report: header band, key facts at a glance, optional map, clear sections, links that open, page numbers. Used by every report."""
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import KeepTogether
+
+    base = getSampleStyleSheet()
+    body = ParagraphStyle("b", parent=base["BodyText"], fontSize=9.2, leading=12.6, textColor=DARK)
+    small = ParagraphStyle("s", parent=body, fontSize=8, leading=10.5, textColor=colors.HexColor("#5b6b62"))
+    h2 = ParagraphStyle("h2", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=14, textColor=GREEN, spaceBefore=9, spaceAfter=4)
+    esc = lambda v: "".join(ch for ch in _flat(v)[:1200] if ord(ch) < 0x2000 or ch in "•–—‘’“”…").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")  # noqa: E731
+
+    def para(v, st=body):
+        try:
+            return Paragraph(_linkify(esc(v)), st)
+        except ValueError:   # odd characters in the data must never stop the report
+            return Paragraph(esc(v).replace("&", "").replace(";", "")[:1200], st)
+    W = A4[0] - 36 * mm
+    head = Table([[Paragraph(f'<font color="white" size="9"><b>VANRAKSHAK</b> &nbsp; forest intelligence &amp; response</font>', body)],
+                  [Paragraph(f'<font color="white" size="18"><b>{esc(title)}</b></font>', ParagraphStyle("t", parent=body, leading=22))],
+                  [Paragraph(f'<font color="#cfeedd" size="9.5">{esc(subtitle)}</font>', body)]], colWidths=[W])
+    head.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), GREEN), ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12), ("TOPPADDING", (0, 0), (0, 0), 9), ("BOTTOMPADDING", (0, -1), (-1, -1), 10)]))
+    story: list[Any] = [head, Spacer(1, 4 * mm)]
+    if summary:   # key facts as cards, up to four across
+        cells = [[Paragraph(f'<font size="14"><b>{esc(v)}</b></font><br/><font size="7.5" color="#5b6b62">{esc(k).upper()}</font>', ParagraphStyle("c", parent=body, leading=15, alignment=1)) for k, v in summary[:4]]]
+        t = Table(cells, colWidths=[W / len(cells[0])] * len(cells[0]))
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), SOFT), ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.white), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+        story += [t, Spacer(1, 3 * mm)]
+    for image, caption in ([(image, caption)] if image else []) + list(images or []):
+        try:
+            im = Image.open(io.BytesIO(image))
+            iw = W
+            story += [RLImage(io.BytesIO(image), width=iw, height=iw * im.height / im.width)]
+            if caption:
+                story.append(para(caption, small))
+            story.append(Spacer(1, 2 * mm))
+        except Exception:  # noqa: BLE001 - a bad picture must not stop the report
+            pass
+    if links:
+        story.append(Paragraph("   ".join(f'<link href="{esc(u)}" color="#0f7a4a"><u>{esc(lbl)}</u></link>' for lbl, u in links), body))
+    for heading, content in blocks:
+        part: list[Any] = [Paragraph(esc(heading), h2)]
+        if isinstance(content, dict):
+            rows = [[para(k, ParagraphStyle("k", parent=body, fontName="Helvetica-Bold")), para(v)] for k, v in content.items() if v not in (None, "", [], {})]
             if rows:
-                t = Table(rows, colWidths=[55 * mm, 110 * mm])
-                t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-                story.append(t)
+                t = Table(rows, colWidths=[W * 0.31, W * 0.69])
+                t.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, -1), SOFT), ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINE), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+                part.append(t)
             else:
-                story.append(Paragraph("No data.", styles["Italic"]))
-        elif isinstance(body, list):
-            story += [Paragraph("- " + esc(x), styles["BodyText"]) for x in body] or [Paragraph("None.", styles["Italic"])]
+                part.append(para("Nothing recorded.", small))
+        elif isinstance(content, list):
+            part += [para("•  " + _flat(x)) for x in content] or [para("None.", small)]
         else:
-            story.append(Paragraph(esc(body), styles["BodyText"]))
-        story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(f"Generated {now()} by RAKSHAK", styles["Code"]))
+            part.append(para(content))
+        story.append(KeepTogether(part[:3]) if len(part) > 3 else KeepTogether(part))
+        story += part[3:]
+    story += [Spacer(1, 5 * mm), para(DISCLAIMER, small)]
+
+    def furniture(canvas, doc):
+        canvas.saveState()
+        canvas.setStrokeColor(LINE)
+        canvas.line(18 * mm, 12 * mm, A4[0] - 18 * mm, 12 * mm)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#5b6b62"))
+        canvas.drawString(18 * mm, 8 * mm, f"VanRakshak · generated {now()[:16].replace('T', ' ')} UTC")
+        canvas.drawRightString(A4[0] - 18 * mm, 8 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
     buf = io.BytesIO()
-    SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=16 * mm, bottomMargin=16 * mm).build(story)
+    SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=14 * mm, bottomMargin=17 * mm, title=title, author="VanRakshak").build(story, onFirstPage=furniture, onLaterPages=furniture)
     return buf.getvalue()
+
+
+def _linkify(text: str) -> str:
+    import re
+
+    return re.sub(r"(https?://[^\s<\"'\]\)\}]+)", lambda m: f'<link href="{m.group(1)}" color="#0f7a4a"><u>open link</u></link>', text)
 
 
 def to_csv(rows: list[dict[str, Any]], columns: list[str]) -> str:

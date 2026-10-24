@@ -159,7 +159,13 @@ def report_pdf(inc: dict[str, Any]) -> bytes:
             blocks.append(("Air quality (modelled ambient)", {"as_of": imp["air_quality"]["as_of"], "pm2_5": imp["air_quality"]["pm2_5_ug_m3"], "pm10": imp["air_quality"]["pm10_ug_m3"], "note": imp["air_quality"]["kind"]}))
     events = fireops.events(inc["id"], limit=200)
     blocks.append(("Event log", [f"{e['ts'][11:19]}  [{e['status']}] {e['service']}: {e['message']}" for e in events]))
-    return generic_pdf(f"VanRakshak fire incident {inc['code']}", "Scenario incident" if inc["is_demo"] else "Satellite hotspot incident: decision support, not a confirmed fire", blocks)
+    from app.services.reports import _static_map
+
+    det = inc.get("detection") or {}
+    place = (det.get("place") or {}).get("name")
+    summary = [("Status", inc["status_label"]), ("Heat power", f"{det['frp_mw']} MW" if det.get("frp_mw") is not None else "n/a"), ("Seen by", str(det.get("satellite") or det.get("source") or "–")), ("Route", f"{round(r['duration_min'])} min" if r.get("status") == "OK" else "none yet")]
+    links = [("Open in Google Maps", f"https://www.google.com/maps?q={inc['lat']},{inc['lon']}")] + ([("Directions by road", r["navigation_url"])] if r.get("status") == "OK" else []) + ([("Walking directions", r["walk_url"])] if r.get("walk_url") else [])
+    return generic_pdf(f"Fire incident {inc['code']}", (place + " · " if place else "") + ("Scenario incident" if inc["is_demo"] else "Past fire from NASA archive" if det.get("archive") else "Satellite hotspot: decision support, not a confirmed fire"), blocks, summary=summary, links=links, image=_static_map(inc["lat"], inc["lon"], 13), caption=f"Satellite view around {inc['lat']:.4f}, {inc['lon']:.4f}")
 
 
 def build_attachments(inc: dict[str, Any], horizon: str = "12") -> list[dict[str, Any]]:

@@ -85,11 +85,24 @@ function paint() {
 }
 function paintList(box) {
   const list = S.list.filter((i) => !['REJECTED', 'CANCELLED'].includes(i.status));
-  const row = (i) => `<button class="row-item" data-id="${esc(i.id)}"><span style="font-size:20px">🔥</span><span class="grow"><b>${esc(i.detection?.place?.name || i.code)}</b><small>${esc(i.code)} · ${esc(age(i.created_at))} ago${i.is_demo ? ' · <span class="tag">Scenario</span>' : ''}</small></span><span class="chip ${STATUS_CHIP[i.status] || ''}">${esc(i.status_label)}</span></button>`;
+  const live = list.filter((i) => !i.detection?.archive && !i.is_demo), past = list.filter((i) => i.detection?.archive), scn = list.filter((i) => i.is_demo);
+  const when = (i) => (i.detection?.archive ? new Date(i.observed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : `${age(i.created_at)} ago`);
+  const row = (i) => `<button class="row-item" data-id="${esc(i.id)}"><span style="font-size:20px">🔥</span><span class="grow"><b>${esc(i.detection?.place?.name || i.code)}</b><small>${esc(i.code)} · ${esc(when(i))}${i.is_demo ? ' · <span class="tag">Scenario</span>' : ''}</small></span><span class="chip ${STATUS_CHIP[i.status] || ''}">${esc(i.status_label)}</span></button>`;
   box.innerHTML = html`<div class="side-head" style="padding-left:0"><div><h2>Fire incidents</h2><div class="sub">Choose one to see it on the map</div></div></div>
-    <div class="list">${list.length ? raw(list.map(row).join('')) : raw('<div class="empty"><b>No fire incidents yet</b>Turn on NASA fire hotspots on the left, click a hotspot and press Investigate.</div>')}</div>
-    ${raw(S.status?.examples_enabled ? `<div class="row2" style="margin-top:10px"><button class="btn sm" id="loadScn">＋ Add example incidents</button>${list.some((i) => i.is_demo) ? '<button class="btn sm" id="rmScn">− Remove examples</button>' : ''}</div>` : '')}
+    <h3 class="grp">Happening now</h3>
+    ${raw(live.length ? `<div class="list">${live.map(row).join('')}</div>` : '<div class="calm">🌿 <b>No forest fire is being recorded right now.</b><span>Turn on NASA fire hotspots on the left, click a hotspot and press Investigate to record one.</span></div>')}
+    <h3 class="grp">Past fires <span class="gnote">examples from NASA's archive</span></h3>
+    ${raw(past.length ? `<div class="list">${past.map(row).join('')}</div>` : '<div class="sub">None added yet. These are real fires that already happened, to look at between live fires.</div>')}
+    <div class="row2" style="margin-top:8px">${raw(past.length ? '<button class="btn sm" id="rmPast">− Remove past fires</button>' : '<button class="btn sm" id="loadPast">🕘 Add past fires</button>')}</div>
+    ${raw(scn.length ? `<h3 class="grp">Scenarios</h3><div class="list">${scn.map(row).join('')}</div>` : '')}
+    ${raw(S.status?.examples_enabled ? `<div class="row2" style="margin-top:10px"><button class="btn sm" id="loadScn">＋ Add example incidents</button>${scn.length ? '<button class="btn sm" id="rmScn">− Remove examples</button>' : ''}</div>` : '')}
     `;
+  $('#loadPast')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Fetching from NASA…';
+    try { const r = await api('/fire/past/load', { method: 'POST' }); await refreshAll(); toast(r.created ? `${r.created} past fires added. Routes are being prepared.` : 'The past fires are already here.'); if (r.job_id) waitJob(r.job_id, null, 3000, 30 * 60 * 1000).then(refreshAll).catch(() => {}); }
+    catch (err) { toast(err.message, 'error'); e.target.disabled = false; e.target.textContent = '🕘 Add past fires'; }
+  });
+  $('#rmPast')?.addEventListener('click', async () => { try { const r = await api('/fire/past/remove', { method: 'POST' }); S.sel = null; await refreshAll(); toast(`${r.removed} past fires removed`); } catch (err) { toast(err.message, 'error'); } });
   if ($('#loadScn')) $('#loadScn').onclick = async (e) => {
     e.target.disabled = true;
     try { const r = await api('/fire/scenarios/load', { method: 'POST' }); await refreshAll(); toast(r.created ? `${r.created} incidents added. Forecasts and routes are being prepared.` : 'The example incidents are already here.'); if (r.job_id) waitJob(r.job_id, null, 3000, 30 * 60 * 1000).then(refreshAll).catch(() => {}); }
@@ -231,10 +244,10 @@ function route(i, pane) {
   const find = '<div class="row2"><button class="btn sm" id="findst">Find stations</button><button class="btn primary sm" id="calcrt">Calculate route</button></div>';
   if (!r) { pane.innerHTML = '<div class="empty"><b>No route yet</b>Looks up fire stations near the incident and compares road routes.</div>' + find; wireRoute(i); return; }
   if (r.status !== 'OK') { pane.innerHTML = `<div class="banner2 red"><b>${esc(r.status)}</b>: ${esc(r.reason || '')}</div>${find}`; wireRoute(i); return; }
-  pane.innerHTML = html`<div class="sect"><h4>🚒 ${r.station.name}</h4><div class="sub">${r.station.data_note} · ${r.station.source}</div>${raw(journeyHtml(r))}<div class="sub">Total ${r.distance_km} km, about ${Math.round(r.duration_min)} min</div>${raw(legendHtml)}
+  pane.innerHTML = html`<div class="sect"><h4>${r.station.kind === 'police_station' ? '👮' : '🚒'} ${r.station.name}</h4><div class="sub">${r.station.data_note} · ${r.station.source}</div>${raw(journeyHtml(r))}<div class="sub">Total ${r.distance_km} km, about ${Math.round(r.duration_min)} min</div>${raw(legendHtml)}
       <div class="sub">Objective: ${r.objective}. Provider: ${r.provider}. Calculated ${new Date(r.calculated_at).toLocaleTimeString()}.</div>${raw(r.selected_manually ? '<div class="sub">Station chosen manually.</div>' : '')}
       <div class="row2" style="margin-top:6px"><a class="btn sm" href="${esc(r.navigation_url)}" target="_blank" rel="noopener">${WAY.drive} Directions by road</a>${raw(r.walk_url ? `<a class="btn sm" href="${esc(r.walk_url)}" target="_blank" rel="noopener">${WAY.walk} Walking directions</a>` : '')}</div></div>
-    <div class="sect"><h4>Candidates compared</h4><table class="t"><tr><th>Station</th><th>Straight</th><th>Road</th><th></th></tr>${raw(r.candidates.map((c) => `<tr><td>${esc(c.station_name)}</td><td>${esc(c.straight_line_km)} km</td><td>${c.distance_km != null ? esc(c.distance_km + ' km · ' + Math.round(c.duration_min) + ' min') + (c.walk_km ? ' ' + WAY.walk : '') : '<span class="chip red">' + esc(c.status) + '</span>'}</td><td>${c.selected ? '✓' : c.distance_km != null ? `<button class="btn sm" data-st="${esc(c.station_id)}">Use</button>` : ''}</td></tr>`).join(''))}</table></div>
+    <div class="sect"><h4>Candidates compared</h4><table class="t"><tr><th>Station</th><th>Straight</th><th>Road</th><th></th></tr>${raw(r.candidates.map((c) => `<tr><td>${esc(c.icon || '🚒')} ${esc(c.station_name)}</td><td>${esc(c.straight_line_km)} km</td><td>${c.distance_km != null ? esc(c.distance_km + ' km · ' + Math.round(c.duration_min) + ' min') + (c.walk_km ? ' ' + WAY.walk : '') : '<span class="chip red">' + esc(c.status) + '</span>'}</td><td>${c.selected ? '✓' : c.distance_km != null ? `<button class="btn sm" data-st="${esc(c.station_id)}">Use</button>` : ''}</td></tr>`).join(''))}</table></div>
     ${raw((r.reasons || []).length ? r.reasons.map((x) => `<div class="banner2 amber">${esc(x.text)}</div>`).join('') : '')}
     <div class="sub">Typical driving time, not live traffic.</div>${find}`;
   wireRoute(i);

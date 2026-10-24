@@ -417,3 +417,16 @@ def test_a_false_alarm_can_be_undone_but_a_resolved_incident_stays_closed():
         fireops.transition(inc2["id"], target, "admin")
     with pytest.raises(fireops.WorkflowError):
         fireops.transition(inc2["id"], "NEEDS_VERIFICATION", "admin")
+
+
+def test_past_fires_can_be_added_and_removed_without_touching_other_incidents(monkeypatch):
+    from datetime import datetime, timezone
+    from app import fire_routes
+
+    monkeypatch.setattr(fire_routes, "_past_hotspots", lambda: [{"lat": 24.99, "lon": 93.47, "observed_at": datetime(2026, 2, 23, 7, 0, tzinfo=timezone.utc), "confidence": 0.9, "frp_mw": 287.3, "satellite": "N"}])
+    monkeypatch.setattr(fire_routes, "_past_pipeline", lambda ids: None)
+    h = {"X-Role": "admin"}
+    r = client.post("/api/v1/fire/past/load", headers=h).json()
+    assert r["created"] == 1 and r["incidents"][0]["detection"]["archive"] is True
+    assert client.post("/api/v1/fire/past/load", headers=h).json()["created"] == 0   # not added twice
+    assert client.post("/api/v1/fire/past/remove", headers=h).json()["removed"] >= 1

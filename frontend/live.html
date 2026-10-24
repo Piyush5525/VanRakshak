@@ -13,18 +13,28 @@
 <body>
   <div id="map" role="application" aria-label="Live map of India"></div>
 
-  <header class="brand card" aria-label="VanRakshak">
+  <header class="brand" aria-label="VanRakshak">
     <img src="/assets/public/logo.svg" alt="VanRakshak logo"><div><strong>VanRakshak</strong><span>Live forest map</span></div>
   </header>
 
-  <div class="views card" id="views" role="group" aria-label="Map view"><button data-v="map" class="on">Map</button><button data-v="sat">Satellite</button><button data-v="terrain">Terrain</button></div>
+  <div class="topbar">
+  <div class="views" id="views" role="group" aria-label="Map view"><button data-v="map" class="on">Map</button><button data-v="sat">Satellite</button><button data-v="terrain">Terrain</button></div>
+
+  <div class="search" id="search" role="search">
+    <span class="mag" aria-hidden="true">🔍</span>
+    <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Search a place, e.g. Jaipur, Wayanad…" aria-label="Search for a place" aria-autocomplete="list" aria-controls="sugg">
+    <button id="qClear" class="qx" hidden aria-label="Clear the search" title="Clear">✕</button>
+    <kbd title="Press / to search">/</kbd>
+    <ul id="sugg" role="listbox" hidden></ul>
+  </div>
+  </div>
 
   <aside class="side left card" id="left" aria-label="Map layers">
     <button class="collapse" data-for="left" aria-label="Hide panel">‹</button>
-    <div class="side-head"><div><h2>Map layers</h2><div class="sub">Everything is off until you turn it on</div></div></div>
-    <label class="layer"><input type="checkbox" id="showFires"><span><b>🔥 NASA fire hotspots</b><small>Dots where satellites see heat</small></span></label>
-    <label class="layer"><input type="checkbox" id="showHeat"><span><b>🌡 Heat zones</b><small>Where hotspots cluster</small></span></label>
-    <label class="layer"><input type="checkbox" id="showCover"><span><b>🌲 Tree cover history</b><small>Areas you have checked, 90 days → today</small></span></label>
+    <div class="dock-title">Layers</div>
+    <label class="layer" title="Dots where NASA satellites see heat"><input type="checkbox" id="showFires"><i class="sw"></i><span>🔥 Fire hotspots</span></label>
+    <label class="layer" title="Where hotspots cluster"><input type="checkbox" id="showHeat"><i class="sw"></i><span>🌡 Heat zones</span></label>
+    <label class="layer" title="Areas you have checked, 90 days to today"><input type="checkbox" id="showCover"><i class="sw"></i><span>🌲 Tree cover</span></label>
     <div id="fireInfo" hidden>
       <div class="big"><b id="fireCount">–</b><span id="fireLabel">hotspots</span></div>
       <div class="sub" id="fireSub"></div>

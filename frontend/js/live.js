@@ -7,6 +7,7 @@ import * as CASES from './cases.js';
 import { pop } from './progress.js';
 import { followCall } from './escalate.js';
 import * as FACTORY from './factory.js';
+import * as SEARCH from './search.js';
 
 const INDIA = [[6.5, 68.1], [37.1, 97.5]];
 const KIND = { cutting: ['Illegal cutting', '🪓', '#a8431f'], fire: ['Forest fire', '🔥', '#d9382a'], encroachment: ['Encroachment', '⛺', '#7a5a1f'], pollution: ['Industrial pollution', '🏭', '#5b4b8a'], other: ['Other', '📍', '#37474f'] };
@@ -41,6 +42,7 @@ $('#views').onclick = (e) => {
   const v = e.target.dataset.v; if (!v || !bases[v]) return;
   map.removeLayer(currentBase); currentBase = bases[v].addTo(map); currentBase.bringToBack();
   $$('#views button').forEach((b) => b.classList.toggle('on', b === e.target));
+  document.body.classList.toggle('dark-map', v === 'sat');
 };
 
 // ------------------------------------------------------------------ India outline
@@ -282,4 +284,5 @@ FIRE.init({ map });
 FOREST.init({ map });
 CASES.init({ map });
 FACTORY.init({ map });
+SEARCH.init({ map });
 FIRE.switchTab('tree');

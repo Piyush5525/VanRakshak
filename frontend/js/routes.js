@@ -19,7 +19,7 @@ export function journeyText(r) {
   const base = `${num(r.distance_km)} km, about ${Math.round(r.duration_min)} min`;
   return r.walk_km ? `${base} (${ICON.drive} ${num(r.drive_km)} km by road + ${ICON.walk} ${num(r.walk_km)} km on foot)` : base;
 }
-export const legendHtml = `<div class="legend2 routeleg"><span><i class="ln drive"></i>🚗 Road</span><span><i class="ln walk"></i>🚶 Walking path</span></div>`;
+export const legendHtml = "";   // the 🚗 / 🚶 chips already say which part is road and which is on foot
 
 // draw a route on a Leaflet layer group: roads solid, walking legs dashed with a small walker on the middle
 export function drawRoute(group, route, opts = {}) {

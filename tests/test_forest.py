@@ -309,3 +309,59 @@ def test_a_newer_stricter_scan_sets_aside_unseen_spots_but_never_a_persons_decis
     # seen again later: it comes back for review; and Undo also works
     fw._ingest(str(uuid.uuid4()), [patch_dict(far)], "t")
     assert {r["id"]: r["status"] for r in client.get("/api/v1/forest-change/records?days=90", headers=ADMIN).json()}[a] == "NEEDS_REVIEW"
+
+
+def test_a_running_check_can_be_cancelled_and_stops_at_its_next_step():
+    rid = str(uuid.uuid4())
+    insert("fc_runs", {"id": rid, "status": "RUNNING", "progress": 0.3, "bbox": [95.0, 21.7, 95.02, 21.72], "window_start": TODAY.isoformat(), "window_end": TODAY.isoformat(), "window_days": 90, "params": {}, "result": {"steps": []}, "created_by": "t", "created_at": now(), "finished_at": None})
+    r = client.post(f"/api/v1/forest-change/runs/{rid}/cancel", headers=ADMIN).json()
+    assert r == {"status": "CANCELLED", "cancelled": True}
+    with pytest.raises(fw.WatchError, match="Cancelled"):
+        fw._step(rid, [], "next step", 0.5)
+    assert client.post(f"/api/v1/forest-change/runs/{rid}/cancel", headers=ADMIN).json()["cancelled"] is False     # already over
+    assert client.post(f"/api/v1/forest-change/runs/{uuid.uuid4()}/cancel", headers=ADMIN).status_code == 404
+    assert client.post(f"/api/v1/forest-change/runs/{rid}/cancel", headers={"X-Role": "read_only"}).status_code == 403
+
+
+def test_police_station_is_used_when_no_forest_office_is_near(monkeypatch):
+    from app.services import responders
+
+    class Router:
+        available = True
+
+        def route(self, o, d, alt):
+            return {"status": "ok", "provider": "t", "primary": {"distance_km": 5.0, "duration_min": 9.0, "adjusted_duration_min": 9.0, "geometry": {"type": "LineString", "coordinates": [o, d]}, "reasons": [], "segments": []}, "alternatives": []}
+
+    monkeypatch.setattr(fw, "discover_offices", lambda *a, **k: None)
+    monkeypatch.setattr(responders, "discover_police", lambda *a, **k: {"added": 0, "sources": {}})
+    rid = new_record(geom=shifted(9.0))
+    c = [x for x in fw._get(rid) and [fw._get(rid)]][0]
+    assert responders.store("police_station", "Test Police Station", c["lat"], c["lon"] + 0.05, "test", "p-" + rid)
+    assert not responders.store("police_station", "Same place", c["lat"], c["lon"] + 0.05, "test", "q-" + rid)   # never stored twice
+    res = fw.assign_authority(rid, Router(), "test")
+    assert res["status"] == "OK" and res["office"]["kind"] == "police_station" and res["office"]["icon"] == "👮" and res["police"] == {"same_as_main": True}
+
+
+def test_nearest_police_station_is_always_given_next_to_a_forest_office(monkeypatch):
+    from app.services import responders
+
+    class Router:
+        available = True
+
+        def route(self, o, d, alt):
+            return {"status": "ok", "provider": "t", "primary": {"distance_km": 5.0, "duration_min": 9.0, "adjusted_duration_min": 9.0, "geometry": {"type": "LineString", "coordinates": [o, d]}, "reasons": [], "segments": []}, "alternatives": []}
+
+    monkeypatch.setattr(fw, "discover_offices", lambda *a, **k: None)
+    monkeypatch.setattr(responders, "discover_police", lambda *a, **k: {"added": 0, "sources": {}})
+    rid = new_record(geom=shifted(11.0))
+    c = fw._get(rid)
+    insert("stations", {"id": str(uuid.uuid4()), "name": "Range Office X", "jurisdiction": "unknown", "location": {"type": "Point", "coordinates": [c["lon"] + 0.02, c["lat"]]}, "coverage": None, "contacts": {}, "availability_note": None, "created_at": now(), "kind": "forest_office", "source": "test", "verified": 0, "external_ref": "fo-" + rid})
+    responders.store("police_station", "Police Y", c["lat"], c["lon"] + 0.04, "test", "py-" + rid)
+    res = fw.assign_authority(rid, Router(), "test")
+    assert res["office"]["kind"] == "forest_office" and res["police"]["name"] == "Police Y" and res["police"]["geometry"]
+
+
+def test_a_spot_has_a_pdf_report_with_summary_and_links():
+    rid = new_record(geom=shifted(13.0))
+    r = client.get(f"/api/v1/forest-change/records/{rid}/report.pdf", headers=ADMIN)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF" and len(r.content) > 3000

@@ -13,7 +13,7 @@ def test_live_map_marks_an_incident_adds_factory_info_and_downloads_a_report(ser
     page.wait_for_selector(".brand img")
     assert page.inner_text(".brand strong") == "VanRakshak"
     assert not page.is_checked("#showFires")   # the NASA layer is off until asked for
-    page.click("#showFires")
+    page.click("label.layer:has(#showFires)")
     page.wait_for_selector("#fireList .empty, #fireList .row-item")
     assert "unavailable" in page.inner_text("#fireList").lower()  # no FIRMS key here: say so, show no sample fires
     assert page.inner_text("#fireCount").strip() == "–"

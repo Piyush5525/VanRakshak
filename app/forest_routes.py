@@ -97,6 +97,20 @@ def _run_out(r: dict[str, Any], timeline: bool = False) -> dict[str, Any]:
     return out
 
 
+@api.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str, role: Role = Depends(require_roles(*SCAN))):
+    """Stop a check that is queued or running. Work already cached is kept; nothing is added to the map."""
+    r = get_one("fc_runs", "id", run_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if r["status"] not in ("QUEUED", "RUNNING"):
+        return {"status": r["status"], "cancelled": False}
+    from app.db.database import update
+    update("fc_runs", "id", run_id, {"status": "CANCELLED", "result": {"steps": [], "error": "Cancelled by " + role.value}, "finished_at": now()})
+    fw.log("scan_cancelled", "pipeline", "ok", "Check cancelled", run_id=run_id, actor=role.value)
+    return {"status": "CANCELLED", "cancelled": True}
+
+
 @api.get("/runs")
 def list_runs(limit: int = Query(20, ge=1, le=100), role: Role = Depends(require_roles(*READ))):
     with connection() as conn:
@@ -154,6 +168,46 @@ def get_record(rid: str, role: Role = Depends(require_roles(*READ))):
     except Exception:  # noqa: BLE001
         pass
     return fw.public(_rec(rid), True)
+
+
+@api.get("/records/{rid}/report.pdf")
+def record_report(rid: str, role: Role = Depends(require_roles(*READ))):
+    """One-page-style PDF for a tree-loss spot: summary, map, permit, who responds and how to get there, and what has been done."""
+    from app.services import geoinfo, reports
+
+    rec = _rec(rid)
+    full = fw.public(rec, True)
+    lat, lon = rec["lat"], rec["lon"]
+    pl = geoinfo.place(lat, lon)
+    a, r, v = rec.get("authority") or {}, rec.get("route") or {}, rec.get("verification") or {}
+    o, po = a.get("office"), a.get("police")
+    km = lambda x: f"{x['distance_km']} km, about {round(x['duration_min'])} min" + (f" (incl. {x['walk_km']} km on foot)" if x.get("walk_km") else "")  # noqa: E731
+    blocks: list[tuple[str, Any]] = [
+        ("Where and when", {"place": pl["name"] if pl else None, "coordinates": f"{lat:.5f}, {lon:.5f}", "estimated date": f"{rec['est_date']} (±{round(rec.get('date_uncertainty_days') or 0)} days)", "age": f"{full.get('age_days')} days", "seen in scans": f"{rec.get('seen_count')}", "evidence": rec.get("evidence")}),
+        ("Permit check", {"result": v.get("meaning"), "next step": v.get("next_step"), **{f"permit {i + 1}": f"{p.get('number') or 'no number'} · {p.get('authority') or 'authority not given'} · {p.get('status') or ''} · {p.get('valid_from') or '?'} to {p.get('valid_to') or '?'}" for i, p in enumerate(v.get("permits") or [])}}),
+    ]
+    if o:
+        blocks.append((f"Main responder: {o.get('kind_label', 'office')}", {"name": o["name"], "distance": f"{o.get('straight_line_km')} km in a straight line", "by road": km(r) if r.get("status") == "OK" else "no road route found", "directions": r.get("navigation_url"), "walking directions": r.get("walk_url"), "phone": None, "source": f"{o.get('source')} (unverified)"}))
+    if po and not po.get("same_as_main"):
+        blocks.append(("Nearest police station", {"name": po["name"], "by road": km(po), "directions": po.get("navigation_url")}))
+    others = a.get("others") or []
+    if others:
+        blocks.append(("Also nearby", [f"{x.get('kind_label', '')}: {x['name']} · " + (km(x) if x.get("distance_km") is not None else f"{x.get('straight_line_km')} km straight") for x in others]))
+    blocks.append(("Status", {"decision": rec["status"].replace("_", " ").title(), "notes": rec.get("notes")}))
+    hist = [f"{e['ts'][:16].replace('T', ' ')}  {e['message']}" for e in fw.events(record_id=rid, limit=60) if e.get("status") != "info"][:40]
+    blocks.append(("What has been done", hist or ["Nothing yet."]))
+    imgs: list[tuple[bytes, str]] = []
+    try:   # the same live pictures the Telegram alert carries: the lost area, and the routes from the responders
+        imgs = [(jpg, cap) for _, jpg, cap in fw.evidence_images(rec)]
+    except Exception:  # noqa: BLE001 - a picture that cannot be made is left out
+        pass
+    if not imgs and (m := reports._static_map(lat, lon)):
+        imgs = [(m, f"Satellite view of {lat:.5f}, {lon:.5f}")]
+    pdf = reports.generic_pdf(f"Tree-loss spot {rec['code']}", (pl["name"] if pl else "Forest area") + " · satellite-detected candidate change", blocks,
+                              summary=[("Area lost", f"{rec['area_ha']} ha"), ("Size", rec["severity"].title()), ("Age", f"{full.get('age_days')} d"), ("Status", rec["status"].replace("_", " ").title())],
+                              links=[("Open in Google Maps", f"https://www.google.com/maps?q={lat},{lon}")] + ([("Directions: " + o["name"][:28], r["navigation_url"])] if o and r.get("navigation_url") else []) + ([("Directions: " + po["name"][:28], po["navigation_url"])] if po and po.get("navigation_url") else []) + [("Satellite view", f"https://www.google.com/maps/@{lat},{lon},400m/data=!3m1!1e3")], images=imgs)
+    audit(role.value, "forest_report_downloaded", "fc_record", rid, {})
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{rec["code"]}-report.pdf"'})
 
 
 @api.patch("/records/{rid}")

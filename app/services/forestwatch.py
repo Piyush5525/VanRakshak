@@ -152,6 +152,10 @@ def validate(bbox: list[float], window_days: int | None, start: date | None, end
 
 # ------------------------------------------------------------------ scan
 def _step(run_id: str, steps: list[dict], msg: str, frac: float | None = None, status: str = "ok") -> None:
+    with connection() as conn:
+        row = conn.execute("SELECT status FROM fc_runs WHERE id = ?", (run_id,)).fetchone()
+    if row and row[0] == "CANCELLED":
+        raise WatchError("Cancelled")
     steps.append({"t": now(), "status": status, "message": msg})
     update("fc_runs", "id", run_id, {"status": "RUNNING", "result": {"steps": steps[-60:]}, **({"progress": frac} if frac is not None else {})})
     log("scan_step", "pipeline", status, msg, run_id=run_id)
@@ -237,6 +241,8 @@ def scan(run_id: str, bbox: list[float], start: date, end: date, use_radar: bool
         audit(actor, "forest_scan_completed", "fc_run", run_id, {"records": created})
         return {"run_id": run_id, **summary}
     except Exception as exc:  # noqa: BLE001 - recorded then re-raised for the job
+        if isinstance(exc, WatchError) and str(exc) == "Cancelled":
+            raise
         _step(run_id, steps, f"Scan failed: {type(exc).__name__}: {str(exc)[:200]}", None, "failed")
         update("fc_runs", "id", run_id, {"status": "FAILED", "result": {"steps": steps[-60:], "error": str(exc)[:300]}, "finished_at": now()})
         raise
@@ -602,85 +608,162 @@ def discover_offices(lat: float, lon: float, radius_km: int = 80, record_id: str
     return {"added": added, "sources": report}
 
 
+def _best_time(r: dict[str, Any]) -> float:
+    return r["adjusted_duration_min"] or r["duration_min"]
+
+
 def assign_authority(record_id: str, router, actor: str, station_id: str | None = None) -> dict[str, Any]:
+    """Pick who should go: the nearest forest office by road, with the nearest police stations alongside (and the other way round when
+    no forest office is near). Everything is compared by road time; the others are listed so the person can switch."""
+    from app.services import responders
+    from app.services.firestations import _segments_small, _walk_url
+
     rec = _get(record_id)
     lat, lon = rec["lat"], rec["lon"]
-    with connection() as conn:
-        rows = [decode_row(dict(r)) for r in conn.execute("SELECT * FROM stations WHERE kind = 'forest_office'")]
     if not _office_near(lat, lon, 60):   # look up offices only when none is known near the site
         discover_offices(lat, lon, record_id=record_id)
-        with connection() as conn:
-            rows = [decode_row(dict(r)) for r in conn.execute("SELECT * FROM stations WHERE kind = 'forest_office'")]
-    cands = sorted(((haversine_km([lon, lat], r["location"]["coordinates"]), r) for r in rows if r["location"].get("type") == "Point"), key=lambda x: x[0])
-    if station_id:
-        cands = [(d, r) for d, r in cands if r["id"] == station_id]
-    cands = [(d, r) for d, r in cands if d <= 200][:3]
+    if not responders.near("police_station", lat, lon, 25):
+        rep = responders.discover_police(lat, lon)
+        log("police_discovered", "authority", "ok" if any(v.get("status") == "ok" for v in rep["sources"].values()) else "failed", f"Police-station lookup: {rep['added']} new", record_id=record_id)
+    if not responders.near("fire_station", lat, lon, 25):
+        from app.services import firestations
+        try:
+            firestations.discover(lat, lon, 40, None, False)
+        except Exception as exc:  # noqa: BLE001 - fire stations are extra; never block the main lookup
+            log("fire_station_lookup_failed", "authority", "failed", f"Fire-station lookup failed: {type(exc).__name__}", record_id=record_id)
+    cands = responders.nearest("forest_office", lat, lon, 2, 200) + responders.nearest("police_station", lat, lon, 2, 60) + responders.nearest("fire_station", lat, lon, 1, 60)
+    if station_id:   # a person chose a specific one: make sure it is among those compared
+        from app.db.database import get_one as _g
+        row = _g("stations", "id", station_id)
+        if row and row["location"].get("type") == "Point" and all(r["id"] != station_id for _, r in cands):
+            cands.append((haversine_km([lon, lat], row["location"]["coordinates"]), row))
     if not cands:
-        res = {"status": "NO_AUTHORITY_FOUND", "reason": "No forest office was found within 200 km in OpenStreetMap or Google Maps. Add one manually or notify the configured response channel only."}
+        res = {"status": "NO_AUTHORITY_FOUND", "reason": "No forest office or police station was found nearby in OpenStreetMap or Google Maps. Add one manually or notify the configured response channel only."}
         update("fc_records", "id", record_id, {"authority": res, "updated_at": now()})
         log("authority_not_found", "authority", "failed", res["reason"], record_id=record_id, actor=actor, error=res["reason"])
         return res
-    log("authority_candidates", "routing", "ok", f"Evaluating {len(cands)} forest office(s) by road network", record_id=record_id, details={"candidates": [{"name": r["name"], "straight_line_km": round(d, 1)} for d, r in cands]})
+    log("authority_candidates", "routing", "ok", f"Evaluating {len(cands)} responder(s) by road network", record_id=record_id, details={"candidates": [{"name": r["name"], "kind": r.get("kind"), "straight_line_km": round(d, 1)} for d, r in cands]})
     if not router.available:
-        d, st = cands[0]
-        res = {"status": "ROUTING_UNAVAILABLE", "office": _office(st, d), "reason": "No routing provider configured; the nearest office by straight line is shown, with no road route or time."}
+        offices = [(d, r) for d, r in cands if r.get("kind") == "forest_office"]
+        d, st = (offices or cands)[0]
+        res = {"status": "ROUTING_UNAVAILABLE", "office": _office(st, d), "others": [_office(r, dd) for dd, r in cands if r["id"] != st["id"]][:3], "reason": "No routing provider configured; the nearest are shown by straight line, with no road route or time."}
         update("fc_records", "id", record_id, {"authority": res, "updated_at": now()})
         log("route_failed", "routing", "failed", res["reason"], record_id=record_id, error=res["reason"])
         return res
     hazards = navigation.active_hazards()
-    best = None
+    done: list[dict[str, Any]] = []
     for d, st in cands:
         rt = router.route(st["location"]["coordinates"], [lon, lat], True)
         if rt["status"] != "ok":
             log("route_candidate_failed", "routing", "failed", f"No route from {st['name']}: {rt.get('reason') or rt['status']}", record_id=record_id, error=str(rt.get("reason"))[:200])
             continue
         ev = navigation.evaluate_routes([rt["primary"], *rt.get("alternatives", [])], hazards)
-        if ev["recommended_index"] is None:
-            continue
-        r = ev["routes"][ev["recommended_index"]]
-        cand = {"office": st, "d": d, "route": r, "provider": rt["provider"]}
-        if not best or (r["adjusted_duration_min"] or r["duration_min"]) < (best["route"]["adjusted_duration_min"] or best["route"]["duration_min"]):
-            best = cand
-    if not best:
-        res = {"status": "FAILED", "office": _office(cands[0][1], cands[0][0]), "reason": "No road route could be calculated from the nearest offices"}
+        if ev["recommended_index"] is not None:
+            done.append({"st": st, "d": d, "route": ev["routes"][ev["recommended_index"]], "provider": rt["provider"]})
+    if not done:
+        res = {"status": "FAILED", "office": _office(cands[0][1], cands[0][0]), "reason": "No route could be calculated from the nearest responders"}
         update("fc_records", "id", record_id, {"authority": res, "updated_at": now()})
         log("route_failed", "routing", "failed", res["reason"], record_id=record_id, error=res["reason"])
         return res
-    st, r = best["office"], best["route"]
-    olat, olon = st["location"]["coordinates"][1], st["location"]["coordinates"][0]
+    forced = next((x for x in done if x["st"]["id"] == station_id), None)
+    forest = sorted([x for x in done if x["st"].get("kind") == "forest_office"], key=lambda x: _best_time(x["route"]))
+    best = forced or (forest[0] if forest and _best_time(forest[0]["route"]) <= 120 else min([x for x in done if x["st"].get("kind") != "fire_station"] or done, key=lambda x: _best_time(x["route"])))
+    st, r = best["st"], best["route"]
     geom = r.get("geometry")
     if geom and len(geom["coordinates"]) > 400:
         step = len(geom["coordinates"]) / 400
         geom = {"type": "LineString", "coordinates": [geom["coordinates"][int(i * step)] for i in range(400)] + [geom["coordinates"][-1]]}
-    from app.services.firestations import _segments_small, _walk_url
-    route = {"status": "OK", "provider": best["provider"], "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": r["adjusted_duration_min"], "geometry": geom, "segments": _segments_small(r.get("segments")), "drive_km": r.get("drive_km"), "walk_km": r.get("walk_km"), "drive_min": r.get("drive_min"), "walk_min": r.get("walk_min"), "walk_url": _walk_url(r.get("segments"), lat, lon), "reasons": r["reasons"], "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={olat},{olon}&destination={lat},{lon}&travelmode=driving", "calculated_at": now(), "caveats": ["Road-network estimate, not live traffic.", "Forest tracks near the site may be missing from road data; the final approach may be on foot.", "The office is unverified public mapping data: its jurisdiction and availability are not confirmed."]}
-    auth = {"status": "OK", "office": _office(st, best["d"]), "selected": "nearest by estimated road time among the 3 closest offices", "assigned_at": now(), "assigned_by": actor}
+    route = {"status": "OK", "provider": best["provider"], "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": r["adjusted_duration_min"], "geometry": geom, "segments": _segments_small(r.get("segments")), "drive_km": r.get("drive_km"), "walk_km": r.get("walk_km"), "drive_min": r.get("drive_min"), "walk_min": r.get("walk_min"),
+             "walk_url": _walk_url(r.get("segments"), lat, lon), "reasons": r["reasons"], "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={st['location']['coordinates'][1]},{st['location']['coordinates'][0]}&destination={lat},{lon}&travelmode=driving", "calculated_at": now(),
+             "caveats": ["Road-network estimate, not live traffic.", "Forest tracks near the site may be missing from road data; the final approach may be on foot.", "The responder is unverified public mapping data: its jurisdiction and availability are not confirmed."]}
+    def resp(x: dict[str, Any]) -> dict[str, Any]:   # a responder with its own road/walk route, so any of them can be shown on the map
+        rr, g = x["route"], x["route"].get("geometry")
+        if g and len(g["coordinates"]) > 200:
+            step = len(g["coordinates"]) / 200
+            g = {"type": "LineString", "coordinates": [g["coordinates"][int(i * step)] for i in range(200)] + [g["coordinates"][-1]]}
+        c = x["st"]["location"]["coordinates"]
+        return {**_office(x["st"], x["d"]), "distance_km": rr["distance_km"], "duration_min": rr["duration_min"], "drive_km": rr.get("drive_km"), "walk_km": rr.get("walk_km"), "drive_min": rr.get("drive_min"), "walk_min": rr.get("walk_min"), "geometry": g, "segments": _segments_small(rr.get("segments")),
+                "walk_url": _walk_url(rr.get("segments"), lat, lon), "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={c[1]},{c[0]}&destination={lat},{lon}&travelmode=driving"}
+
+    rest = sorted((y for y in done if y is not best), key=lambda y: _best_time(y["route"]))
+    pol = next((x for x in rest if x["st"].get("kind") == "police_station"), None)
+    police = resp(pol) if pol else ({"same_as_main": True} if st.get("kind") == "police_station" else None)
+    others = [resp(x) for x in rest if x is not pol][:4]
+    why = "chosen by you" if forced else "nearest forest office by road" if st.get("kind") == "forest_office" else "no forest office is close, so the nearest police station by road"
+    auth = {"status": "OK", "v": 2, "office": _office(st, best["d"]), "police": police, "others": others, "selected": why, "assigned_at": now(), "assigned_by": actor}
     update("fc_records", "id", record_id, {"authority": auth, "route": route, "updated_at": now()})
-    audit(actor, "forest_authority_assigned", "fc_record", record_id, {"office": st["name"]})
+    audit(actor, "forest_authority_assigned", "fc_record", record_id, {"office": st["name"], "kind": st.get("kind")})
     log("route_calculated", "routing", "ok", f"Route ready: {route['distance_km']} km, about {round(route['duration_min'])} min{' (' + str(route['walk_km']) + ' km of it on foot)' if route.get('walk_km') else ''}", record_id=record_id, actor=actor)
-    log("authority_assigned", "authority", "ok", f"Assigned to {st['name']} (office details unverified)", record_id=record_id, actor=actor)
+    log("authority_assigned", "authority", "ok", f"Assigned to {st['name']} ({LABELS.get(st.get('kind'), 'responder')}, details unverified)", record_id=record_id, actor=actor)
     return {**auth, "route": route}
+
+
+LABELS = {"forest_office": "forest office", "police_station": "police station", "fire_station": "fire station"}
 
 
 def _office(st: dict[str, Any], d: float) -> dict[str, Any]:
     c = st["location"]["coordinates"]
-    return {"id": st["id"], "name": st["name"], "lat": c[1], "lon": c[0], "source": st.get("source"), "verified": bool(st.get("verified")), "straight_line_km": round(d, 1), "phone": ("…" + str(st["contacts"]["phone"])[-3:]) if (st.get("contacts") or {}).get("phone") else None, "data_note": "Unverified public mapping data"}
+    k = st.get("kind") or "forest_office"
+    return {"id": st["id"], "name": st["name"], "kind": k, "kind_label": LABELS.get(k, k).capitalize(), "icon": {"forest_office": "🌲", "police_station": "👮", "fire_station": "🚒"}.get(k, "📍"), "lat": c[1], "lon": c[0], "source": st.get("source"), "verified": bool(st.get("verified")), "straight_line_km": round(d, 1), "phone": ("…" + str(st["contacts"]["phone"])[-3:]) if (st.get("contacts") or {}).get("phone") else None, "data_note": "Unverified public mapping data"}
 
 
 # ------------------------------------------------------------------ notifications
+def _contact(o: dict[str, Any]) -> str | None:
+    """Full number of a responder from public map data (the stored record), for the people who must call them."""
+    row = get_one("stations", "id", o.get("id")) if o.get("id") else None
+    return ((row or {}).get("contacts") or {}).get("phone")
+
+
 def compose(rec: dict[str, Any], html_mode: bool = True) -> str:
+    """The Telegram report: what happened, exactly where, how to get there, who is nearest, what to do. Readable on a phone in a few seconds."""
+    from app.services import geoinfo
+
     e = escape if html_mode else (lambda s: s)
-    b = (lambda s: f"<b>{s}</b>") if html_mode else (lambda s: s)
+    b = (lambda s: f"<b>{escape(s)}</b>") if html_mode else (lambda s: s)
+    code = (lambda s: f"<code>{escape(s)}</code>") if html_mode else (lambda s: s)
+    link = (lambda label, url: f'<a href="{escape(url)}">{escape(label)}</a>') if html_mode else (lambda label, url: f"{label}: {url}")
+    lat, lon = rec["lat"], rec["lon"]
     ver = (rec["verification"] or {}).get("class", "NOT_CHECKED")
     a, r = rec["authority"] or {}, rec["route"] or {}
-    lines = [b(e(f"VanRakshak forest-change alert {rec['code']}")), e(f"Severity {rec['severity']} · {rec['area_ha']} ha of tree cover lost"), e(f"Estimated date: {rec['est_date']} (±{round(rec['date_uncertainty_days'] or 0)} days) · evidence: {rec['evidence']}"), e(f"Location: {rec['lat']:.5f}, {rec['lon']:.5f}"), e(f"Government-record check: {VERIFICATION.get(ver, ('not run',))[0]}")]
-    if a.get("office"):
-        lines.append(e(f"Responsible office (unverified): {a['office']['name']}"))
-    if r.get("status") == "OK":
-        lines.append(e(f"Road route: {r['distance_km']} km, about {round(r['duration_min'])} min · {r['navigation_url']}"))
-    lines.append(e(f"Map: https://www.google.com/maps?q={rec['lat']},{rec['lon']}"))
-    lines.append(e("Satellite-detected candidate change. It is not a finding that anything is unlawful: please verify on the ground."))
-    return "\n".join(lines)
+    pl = geoinfo.place(lat, lon)
+    est = date.fromisoformat(rec["est_date"])
+    days = (datetime.now(timezone.utc).date() - est).days
+    sev = {"HIGH": "🔴", "MEDIUM": "🟠"}.get(rec["severity"], "🟡")
+    permit = {"NO_RECORD_FOUND": "❌ No permit in the register covers this spot", "AUTHORIZED_RECORD_MATCH": "✅ A permit in the register covers it (still to be checked on the ground)", "PARTIAL_OR_UNCLEAR_RECORD": "⚠️ A permit exists nearby; it may not cover this clearing", "EXPIRED_OR_REVOKED_RECORD": "⚠️ A permit exists but is expired or revoked"}.get(ver, "❔ Permit not checked")
+    L = [f"🚨 {b('FOREST ALERT · ' + rec['code'])}", f"{sev} {b(str(rec['area_ha']) + ' ha of tree cover lost')} · {rec['severity'].title()} size", ""]
+    L += [f"📍 {b('WHERE')}"]
+    if pl:
+        L.append(e(pl["name"]))
+    L += [code(f"{lat:.5f}, {lon:.5f}"), link("🗺 Open in Google Maps", f"https://www.google.com/maps?q={lat},{lon}") + "  " + link("🛰 Satellite view", f"https://www.google.com/maps/@{lat},{lon},400m/data=!3m1!1e3"), "",
+          f"🕒 {b('WHEN')}", e(f"About {est.strftime('%d %b %Y')} ({'in the last few days' if days <= 3 else str(days) + ' days ago'}, ±{round(rec['date_uncertainty_days'] or 0)} days)") + f" · seen in {rec.get('seen_count') or 1} satellite scan(s)", "",
+          f"📄 {b('PERMIT')}", e(permit), ""]
+    o = a.get("office")
+    if o:
+        L.append(f"{o.get('icon', '🏛')} {b('GO TO THE SITE FROM · ' + (o.get('kind_label') or 'Office'))}")
+        L.append(e(o["name"]))
+        if r.get("status") == "OK":
+            L.append(e(f"🚗 {r['distance_km']} km, about {round(r['duration_min'])} min" + (f" · incl. 🚶 {r['walk_km']} km on foot" if r.get("walk_km") else "")))
+            L.append(link("🚗 Directions by road", r["navigation_url"]) + (("  " + link("🚶 Walking directions", r["walk_url"])) if r.get("walk_url") else ""))
+        ph = _contact(o)
+        if ph:
+            L.append(e(f"📞 {ph}"))
+        L.append("")
+    po = a.get("police")
+    if po and not po.get("same_as_main"):
+        L.append(f"👮 {b('NEAREST POLICE STATION · for an immediate response')}")
+        L.append(e(po["name"]))
+        L.append(e(f"🚗 {po['distance_km']} km, about {round(po['duration_min'])} min" + (f" · incl. 🚶 {po['walk_km']} km on foot" if po.get("walk_km") else "")))
+        L.append(link("🚗 Directions by road", po["navigation_url"]))
+        ph = _contact(po)
+        if ph:
+            L.append(e(f"📞 {ph}"))
+        L.append("")
+    elif o and o.get("kind") == "police_station":
+        L.append(e("No forest office is close, so the nearest police station is the main responder."))
+        L.append("")
+    L += [f"✅ {b('WHAT TO DO')}", e("1. Go to the location above and check what has happened."), e("2. Take photos and note the time."), e("3. Reply here: real loss, or false alarm."), "",
+          e("ℹ️ Found by satellite (Sentinel-2/1). It is a candidate change, not a finding that anything is unlawful. Responder details are from public maps and are unverified.")]
+    return "\n".join(L)
 
 
 def _prior(rec: dict[str, Any], channel: str, mode: str) -> bool:
@@ -726,6 +809,53 @@ def _n_dashboard(rec, text, plain, real, actor):
     return {"status": "SENT", "note": "Visible in the VanRakshak dashboard and activity log"}
 
 
+def evidence_images(rec: dict[str, Any]) -> list[tuple[str, bytes, str]]:
+    """Two pictures for the responders: the lost area on satellite imagery, and the route(s) from the forest office / police station to it.
+    Returns (filename, jpeg, caption); a picture that cannot be made is left out, never replaced by a stock image."""
+    import io
+    import json as _json
+    from urllib.parse import quote
+
+    from PIL import Image
+    from app.services import mapimage as mi
+
+    lat, lon = rec["lat"], rec["lon"]
+    a, r = rec.get("authority") or {}, rec.get("route") or {}
+    out: list[tuple[str, bytes, str]] = []
+    site = f"pin-l+d9382a({lon},{lat})"
+    feat = {"type": "Feature", "properties": {"stroke": "#ff3b30", "stroke-width": 3, "fill": "#ff3b30", "fill-opacity": 0.35}, "geometry": {"type": "Polygon", "coordinates": [ring]}} if (ring := (mi._rings(rec.get("geometry"), 40) or [None])[0]) else None
+    ov = ([f"geojson({quote(_json.dumps({'type': 'FeatureCollection', 'features': [feat]}, separators=(',', ':')), safe='')})"] if feat else []) + [site]
+    head = [(f"VanRakshak  {rec['code']}  {rec['area_ha']} ha of tree cover lost", (255, 255, 255)), (f"{lat:.5f}, {lon:.5f} · about {rec['est_date']} · red = area lost", (255, 210, 120))]
+    try:
+        png = mi._mapbox(ov)
+        if png:
+            out.append((f"{rec['code']}-site.jpg", mi._banner(Image.open(io.BytesIO(png)), head, "Satellite basemap: Mapbox, Maxar · candidate change, verify on the ground"), f"📍 {rec['code']} · the area where trees were lost (red). Coordinates {lat:.5f}, {lon:.5f}"))
+    except Exception as exc:  # noqa: BLE001
+        log("telegram_image_failed", "telegram", "failed", f"Site picture not made: {type(exc).__name__}", record_id=rec["id"])
+    o, po = a.get("office"), a.get("police")
+    legs = []
+    if o and r.get("status") == "OK" and r.get("geometry"):
+        legs.append((o, r, "14573c", "park" if o.get("kind") != "police_station" else "police"))
+    if po and po.get("geometry"):
+        legs.append((po, po, "7b1fa2", "police"))
+    if legs:
+        ov, lines2 = [], []
+        for who, rt, col, icon in legs:
+            ov.append(f"path-5+{col}-0.9({quote(mi._poly5(mi._thin(rt['geometry']['coordinates'], 150)), safe='')})")
+        for who, rt, col, icon in legs:
+            ov.append(f"pin-l-{icon}+{col}({who['lon']},{who['lat']})")
+            lines2.append((f"{who.get('kind_label', 'Responder')} · {who['name'][:34]}: {rt['distance_km']} km, ~{round(rt['duration_min'])} min", (190, 235, 205) if col == "14573c" else (225, 190, 245)))
+        ov.append(site)
+        try:
+            png = mi._mapbox(ov)
+            if png:
+                cap = "🚗 Routes to the site: " + " · ".join(f"{who.get('kind_label', 'Responder')} {rt['distance_km']} km / {round(rt['duration_min'])} min" for who, rt, _, _ in legs)
+                out.append((f"{rec['code']}-routes.jpg", mi._banner(Image.open(io.BytesIO(png)), [(f"Routes to {rec['code']}", (255, 255, 255))] + lines2, "Typical road time, not live traffic · responder details unverified"), cap))
+        except Exception as exc:  # noqa: BLE001
+            log("telegram_image_failed", "telegram", "failed", f"Route picture not made: {type(exc).__name__}", record_id=rec["id"])
+    return out
+
+
 def _n_telegram(rec, text, plain, real, actor):
     if not real:
         log("telegram_simulated", "telegram", "info", f"SIMULATED Telegram message composed for {rec['code']} (nothing was sent)", record_id=rec["id"], actor=actor)
@@ -735,9 +865,19 @@ def _n_telegram(rec, text, plain, real, actor):
         log("telegram_not_configured", "telegram", "failed", "Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)", record_id=rec["id"], error="unconfigured")
         return {"status": "NOT_CONFIGURED", "error": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing"}
     err = None
+    try:
+        pics = evidence_images(rec)
+    except Exception as exc:  # noqa: BLE001 - pictures are a bonus; the message must still go
+        pics = []
+        log("telegram_image_failed", "telegram", "failed", f"Pictures not made: {type(exc).__name__}", record_id=rec["id"])
     for attempt in range(1, 4):
         try:
             res = firecomms._call("sendMessage", {"chat_id": settings.telegram_chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"})
+            for name, jpg, cap in pics:
+                try:
+                    firecomms._call("sendPhoto", {"chat_id": settings.telegram_chat_id, "caption": cap[:1000]}, {"photo": (name, jpg, "image/jpeg")})
+                except firecomms.TelegramError as exc:
+                    log("telegram_image_failed", "telegram", "failed", f"A picture was not accepted by Telegram: {exc}", record_id=rec["id"], error=str(exc)[:200])
             try:
                 firecomms._call("sendLocation", {"chat_id": settings.telegram_chat_id, "latitude": rec["lat"], "longitude": rec["lon"]})
             except firecomms.TelegramError:
@@ -773,7 +913,12 @@ def spoken(rec: dict[str, Any]) -> str:
         parts.append("A permit exists nearby, but it may not cover this clearing.")
     if a.get("office") and r.get("status") == "OK":
         o = a["office"]
-        parts.append(f"The responsible office is {o['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, {geoinfo.say_journey(r)}.")
+        police = next((x for x in a.get("others", []) if x.get("kind") == "police_station"), None)
+        parts.append(f"The responsible {LABELS.get(o.get('kind'), 'office')} is {o['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, {geoinfo.say_journey(r)}.")
+    if a.get("office") and a["office"].get("kind") != "police_station":
+        police = a.get("police") if a.get("police") and not a["police"].get("same_as_main") else None
+        if police:
+            parts.append(f"The nearest police station is {police['name']}, about {geoinfo.say_journey(police)}.")
     parts.append(f"The location is {abs(lat):.3f} degrees {'north' if lat >= 0 else 'south'}, {abs(lon):.3f} degrees {'east' if lon >= 0 else 'west'}. The record code is {rec['code'].replace('-', ' ')}.")
     parts.append("This comes from satellite images and must be checked on the ground. The map and route are in the VanRakshak app. Please verify and respond.")
     return " ".join(parts)

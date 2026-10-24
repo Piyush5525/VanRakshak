@@ -109,6 +109,10 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
         cands = [(haversine_km([lon, lat], row["location"]["coordinates"]), row)]
     else:
         cands = nearby(lat, lon, limit=max_candidates)
+        from app.services import responders   # police stations are compared too; a fire station is still preferred when one is reachable
+        if not responders.near("police_station", lat, lon, 25):
+            responders.discover_police(lat, lon)
+        cands += responders.nearest("police_station", lat, lon, 2, 60)
     if not cands:
         res = {"status": "NO_STATIONS", "reason": "No fire station is registered near this location. Run station lookup or add one manually.", "calculated_at": t0.isoformat()}
         fireops.patch(incident_id, route=res)
@@ -125,7 +129,7 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
     for d, st in cands:
         origin = st["location"]["coordinates"]
         rt = router.route(origin, [lon, lat], True)
-        entry = {"station_id": st["id"], "station_name": st["name"], "straight_line_km": round(d, 1), "status": rt["status"]}
+        entry = {"station_id": st["id"], "station_name": st["name"], "kind": st.get("kind") or "fire_station", "icon": "👮" if st.get("kind") == "police_station" else "🚒", "straight_line_km": round(d, 1), "status": rt["status"]}
         if rt["status"] != "ok":
             entry["error"] = rt.get("reason") or str(rt.get("details"))
             fireops.log_event(incident_id, "route_candidate_failed", "routing", "failed", f"No route from {st['name']}: {entry['error']}"[:300], error=entry["error"], is_demo=demo)
@@ -145,7 +149,8 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
         fireops.patch(incident_id, route=res)
         fireops.log_event(incident_id, "route_failed", "routing", "failed", res["reason"], error=str(evaluated)[:400], is_demo=demo)
         return res
-    best = min(usable, key=lambda e: (e.get("adjusted_duration_min") or e["duration_min"]))
+    pool = [e for e in usable if e["kind"] == "fire_station"] if not station_id else usable
+    best = min(pool or usable, key=lambda e: (e.get("adjusted_duration_min") or e["duration_min"]))
     st = get_one("stations", "id", best["station_id"])
     for e in evaluated:
         e["selected"] = e["station_id"] == best["station_id"]
