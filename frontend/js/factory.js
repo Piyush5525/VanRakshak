@@ -59,7 +59,7 @@ const field = (id, label, val, ph, type = 'text', extra = '') => `<label class="
 function paintForm() {
   const box = $('#rightBody'), f = S.form, d = S.doc;
   const found = (k) => (d?.fields?.[k] ? `<span class="found" title="${esc(d.fields[k].snippet || '')}">from document${d.fields[k].page ? ', p.' + d.fields[k].page : ''}</span>` : '');
-  box.innerHTML = html`<button class="back" id="fback">‹ Back</button>
+  box.innerHTML = html`<button class="back" id="facBack">‹ Back</button>
     <div class="side-head" style="padding:0"><div><h2>Check a factory</h2><div class="sub">What it would do to the forest and its surroundings</div></div></div>
     <div class="step"><span class="n">1</span><b>Where will it be?</b></div>
     <div class="row2"><button class="btn ${S.placing ? 'primary' : ''}" id="fPlace">📍 ${S.placing ? 'Click the map…' : 'Place on the map'}</button><button class="btn sm" id="fMid">Use map centre</button></div>
@@ -77,11 +77,11 @@ function paintForm() {
     </div>
     <details class="more" ${f.emissions.length || f.clearing_days || f.operation_start_day ? 'open' : ''}><summary>More details (optional)</summary>
       <div class="sub" style="margin:6px 0">Emission figures you can source. Nothing is estimated for you.</div>
-      <div id="fEms">${raw(f.emissions.map(emRow).join(''))}</div><button class="btn sm" id="fAddEm">＋ Add a figure</button>
+      <div id="fEms">${raw(f.emissions.map((e, k) => emRow(e, k)).join(''))}</div><button class="btn sm" id="fAddEm">＋ Add a figure</button>
       <div class="grid2" style="margin-top:8px">${raw(field('fClear', 'Clearing takes (days)', f.clearing_days, '45', 'number', 'min="1"'))}${raw(field('fOp', 'Starts running on day', f.operation_start_day, '60', 'number', 'min="0"'))}</div></details>
     <button class="btn primary big" id="facRun" disabled>Check the effect</button><div id="facErr"></div>`;
   paintPos();
-  $('#fback').onclick = () => { clear(); S.back?.(); };
+  $('#facBack').onclick = () => { clear(); S.back?.(); };
   $('#fPlace').onclick = () => { S.placing = !S.placing; setHint(); paintForm(); if (S.placing) toast('Click the map where the factory will go'); };
   $('#fMid').onclick = () => { const c = S.map.getCenter(); place(c.lat, c.lng); };
   $('#fMode').onclick = (e) => { const m = e.target.dataset.m; if (m) { readForm(); S.mode = m; paintForm(); } };
@@ -89,10 +89,11 @@ function paintForm() {
   const drop = $('#fDrop'); if (drop) { drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); }; drop.ondragleave = () => drop.classList.remove('over'); drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files[0]); }; }
   $('#fUseLoc')?.addEventListener('click', () => { const c = S.doc.fields.coordinates.value; place(c.lat, c.lon); S.map.flyTo([c.lat, c.lon], 14); });
   $('#fAddEm').onclick = () => { readForm(); S.form.emissions.push({ pollutant: '', value: '', unit: '', source: '' }); paintForm(); };
+  $$('.fem .rm').forEach((b) => (b.onclick = () => { readForm(); S.form.emissions.splice(Number(b.dataset.i), 1); paintForm(); }));
   $$('#rightBody input, #rightBody select').forEach((i) => i.addEventListener('input', () => { const go = $('#facRun'); if (go) go.disabled = !S.pos || !$('#fName').value.trim(); }));
   $('#facRun').onclick = run;
 }
-const emRow = (e) => `<div class="fem"><input class="p" placeholder="Pollutant" value="${esc(e.pollutant)}"><input class="v" type="number" step="any" placeholder="Value" value="${esc(e.value)}"><input class="u" placeholder="Unit" value="${esc(e.unit)}"><input class="s" placeholder="Source (permit, report page)" value="${esc(e.source)}"></div>`;
+const emRow = (e, k) => `<div class="fem"><button class="rm" data-i="${k}" title="Remove this figure" aria-label="Remove this figure">−</button><input class="p" placeholder="Pollutant" value="${esc(e.pollutant)}"><input class="v" type="number" step="any" placeholder="Value" value="${esc(e.value)}"><input class="u" placeholder="Unit" value="${esc(e.unit)}"><input class="s" placeholder="Source (permit, report page)" value="${esc(e.source)}"></div>`;
 
 async function upload(file) {
   if (!file) return;
@@ -184,6 +185,7 @@ function paintResult() {
     ${raw(r.inputs.emissions?.length ? `<div class="sect"><h4>Figures you supplied</h4>${r.inputs.emissions.map((e) => `<div class="sub">${esc(e.pollutant)}: <b>${esc(e.value)} ${esc(e.unit)}</b> · ${esc(e.source)}</div>`).join('')}</div>` : '')}
     <div class="row2" style="margin-top:10px"><button class="btn primary grow" id="ftrack">🛰 Watch real change nearby (90 days)</button></div>
     <div class="row2" style="margin-top:6px"><button class="btn grow" id="fpdf">⬇ Download report</button><button class="btn" id="fnew">Check another</button></div>
+    <div class="row2" style="margin-top:6px"><button class="btn sm danger" id="fdel">− Remove this check</button></div>
     <details class="sect"><summary><b>Sources and limits</b></summary><ul class="sub"><li>${raw(Object.values(r.sources).map(esc).join('</li><li>'))}</li><li>${esc(r.projection.assumptions.note)}</li></ul></details>`;
   $('#rback').onclick = () => { clear(); S.back?.(); };
   $('#fday').onclick = (e) => { const d = e.target.dataset.d; if (d !== undefined) go(Number(d)); };
@@ -192,6 +194,7 @@ function paintResult() {
   $$('input[data-k]', box).forEach((i) => (i.onchange = () => { S.on[i.dataset.k] = i.checked; draw(); }));
   $('#fpdf').onclick = () => import('./core.js').then((c) => c.download(`/factory/checks/${res.id}/report.pdf`, `factory-check-${res.name.replace(/\W+/g, '-')}.pdf`));
   $('#fnew').onclick = () => start(S.back);
+  $('#fdel').onclick = async (e) => { const b = e.target; if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to remove'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '− Remove this check'; } }, 5000); return; } try { await api('/factory/checks/' + res.id, { method: 'DELETE' }); toast('Check removed'); clear(); S.back?.(); } catch (err) { toast(err.status === 403 ? 'Only a Reviewer or Admin can remove a check' : err.message, 'error'); } };
   $('#ftrack').onclick = track;
 }
 function go(d) { S.day = d; paintResult(); draw(); }

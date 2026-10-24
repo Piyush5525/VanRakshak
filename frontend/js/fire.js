@@ -1,6 +1,8 @@
 // Fire response workspace for the live map: one incident record drives forecast, impact, route, Telegram, IVR and the event log.
 import { api, esc, html, raw, toast, waitJob } from './core.js';
 import { pop, historyHtml } from './progress.js';
+import { followCall } from './escalate.js';
+import { drawRoute, journeyHtml, journeyText, legendHtml, walkLink, ICON as WAY } from './routes.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -65,7 +67,7 @@ function drawIncidentLayers(i) {
   const r = i.route;
   if (r?.status === 'OK') {
     (r.alternatives || []).forEach((a) => a.geometry && L.geoJSON(a.geometry, { style: { color: '#6b7c74', weight: 4, opacity: 0.7, dashArray: '8 8' }, interactive: false }).addTo(S.layer));
-    L.geoJSON(r.geometry, { style: { color: '#14573c', weight: 6, opacity: 0.9 }, interactive: false }).addTo(S.layer);
+    drawRoute(S.layer, r);
     L.marker([r.station.lat, r.station.lon], { icon: L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 30], html: '<div class="pin" style="background:#14573c"><span>🚒</span></div>' }) }).bindPopup(`<b>${esc(r.station.name)}</b><br>${esc(r.station.data_note)}<br>${esc(r.distance_km)} km, about ${Math.round(r.duration_min)} min by road`).addTo(S.layer);
   }
 }
@@ -85,10 +87,10 @@ function paintList(box) {
   const list = S.list.filter((i) => !['REJECTED', 'CANCELLED'].includes(i.status));
   const row = (i) => `<button class="row-item" data-id="${esc(i.id)}"><span style="font-size:20px">🔥</span><span class="grow"><b>${esc(i.detection?.place?.name || i.code)}</b><small>${esc(i.code)} · ${esc(age(i.created_at))} ago${i.is_demo ? ' · <span class="tag">Scenario</span>' : ''}</small></span><span class="chip ${STATUS_CHIP[i.status] || ''}">${esc(i.status_label)}</span></button>`;
   box.innerHTML = html`<div class="side-head" style="padding-left:0"><div><h2>Fire incidents</h2><div class="sub">Choose one to see it on the map</div></div></div>
-    <div class="list">${list.length ? raw(list.map(row).join('')) : raw('<div class="empty"><b>No fire incidents yet</b>Add the example incidents below, or turn on NASA fire hotspots on the left, click a hotspot and press Investigate.</div>')}</div>
-    <div class="row2" style="margin-top:10px"><button class="btn sm" id="loadScn">＋ Add example incidents</button>${raw(list.some((i) => i.is_demo) ? '<button class="btn sm" id="rmScn">Remove examples</button>' : '')}</div>
+    <div class="list">${list.length ? raw(list.map(row).join('')) : raw('<div class="empty"><b>No fire incidents yet</b>Turn on NASA fire hotspots on the left, click a hotspot and press Investigate.</div>')}</div>
+    ${raw(S.status?.examples_enabled ? `<div class="row2" style="margin-top:10px"><button class="btn sm" id="loadScn">＋ Add example incidents</button>${list.some((i) => i.is_demo) ? '<button class="btn sm" id="rmScn">− Remove examples</button>' : ''}</div>` : '')}
     `;
-  $('#loadScn').onclick = async (e) => {
+  if ($('#loadScn')) $('#loadScn').onclick = async (e) => {
     e.target.disabled = true;
     try { const r = await api('/fire/scenarios/load', { method: 'POST' }); await refreshAll(); toast(r.created ? `${r.created} incidents added. Forecasts and routes are being prepared.` : 'The example incidents are already here.'); if (r.job_id) waitJob(r.job_id, null, 3000, 30 * 60 * 1000).then(refreshAll).catch(() => {}); }
     catch (err) { toast(err.message, 'error'); } finally { e.target.disabled = false; }
@@ -99,12 +101,12 @@ function paintList(box) {
 
 function paintDetail(box) {
   const i = cur(); if (!i) { S.sel = null; return paintList(box); }
-  const tabs = [['overview', 'Overview'], ['forecast', 'Forecast'], ['impact', 'Impact'], ['route', 'Route'], ['comms', 'Alert']];
-  box.innerHTML = html`<button class="back" id="fback">‹ All fire incidents</button>
+  const tabs = [['overview', 'Overview'], ['forecast', 'Forecast'], ['impact', 'Impact'], ['route', 'Route'], ['comms', 'Messages']];
+  box.innerHTML = html`<button class="back" id="fireBack">‹ All fire incidents</button>
     <div class="row-item" style="border:0;padding:0"><span style="font-size:24px">🔥</span><span class="grow"><h2 style="font-size:17px">${i.detection?.place?.name || i.code}</h2><div class="sub">${i.code} · ${i.lat.toFixed(4)}, ${i.lon.toFixed(4)} ${raw(i.is_demo ? '<span class="tag">Scenario</span>' : '')}</div></span><span class="chip ${STATUS_CHIP[i.status] || ''}">${i.status_label}</span></div>
     <div class="sub-tabs" id="stabs">${raw(tabs.map(([k, n]) => `<button data-k="${k}" class="${S.tab === k ? 'on' : ''}">${n}</button>`).join(''))}</div>
     <div id="pane"></div>`;
-  $('#fback').onclick = () => { S.sel = null; drawPins(); paint(); };
+  $('#fireBack').onclick = () => { S.sel = null; drawPins(); paint(); };
   $('#stabs').onclick = (e) => { const k = e.target.dataset.k; if (k) { S.tab = k; paintDetail(box); drawPins(); const i2 = cur(); if (k === 'route' && i2.route?.status === 'OK') S.ctx.map.fitBounds(L.geoJSON(i2.route.geometry).getBounds().pad(0.15)); if (k === 'forecast' && i2.forecast?.horizons) { const g = i2.forecast.horizons[S.hz].contours.possible_10; if (g) S.ctx.map.fitBounds(L.geoJSON(g).getBounds().pad(0.2)); } } };
   ({ overview, forecast, impact, route, comms })[S.tab](i, $('#pane'));
 }
@@ -113,32 +115,78 @@ function paintDetail(box) {
 function overview(i, pane) {
   const d = i.detection || {}; const cur_ = d.currency;
   const curLab = { current: ['obs', 'CURRENT'], delayed: ['est', 'DELAYED'], historical: ['na', 'HISTORICAL'], demo: ['na', 'SCENARIO'], 'n/a': ['na', 'MANUAL REPORT'] }[cur_] || ['na', cur_ || '?'];
-  const roles = curRole(); const canAct = ['admin', 'reviewer', 'officer'].includes(roles), canDispatch = ['admin', 'officer'].includes(roles);
-  const actions = [];
-  if (['NEEDS_VERIFICATION', 'INCONCLUSIVE', 'DETECTED'].includes(i.status)) actions.push(`<div class="sub">Verify before anything is sent. A thermal anomaly can also be crop burning, a kiln or industrial heat.</div><input type="text" id="vnote" placeholder="Evidence / note (e.g. ranger saw smoke)" style="margin:6px 0"><div class="row2"><button class="btn primary sm" data-v="confirm" ${canAct ? '' : 'disabled'}>Confirm fire</button><button class="btn sm" data-v="inconclusive" ${canAct ? '' : 'disabled'}>Inconclusive</button><button class="btn sm danger" data-v="reject" ${canAct ? '' : 'disabled'}>Reject</button></div>`);
-  if (i.status === 'DISPATCH_REQUESTED') actions.push(`<div class="sub">No responder has confirmed yet. Record an acknowledgement only when one has actually been received.</div><div class="row2"><input type="text" id="anote" placeholder="e.g. Station officer confirmed by radio" class="grow"><button class="btn sm" id="ack" ${canDispatch ? '' : 'disabled'}>Record acknowledgement</button></div>`);
-  if (['DISPATCHED', 'MONITORING'].includes(i.status)) actions.push(`<div class="row2"><input type="text" id="unote" placeholder="Field update" class="grow"><button class="btn sm" id="upd">Add update</button></div><button class="btn sm danger" id="resolve" style="margin-top:6px" ${canDispatch ? '' : 'disabled'}>Mark resolved</button>`);
-  if (!['RESOLVED', 'REJECTED', 'CANCELLED'].includes(i.status)) actions.push('<button class="btn sm" id="cancel" style="margin-top:6px">Cancel incident</button>');
   pane.innerHTML = html`<div class="sect"><h4>${raw(lab(curLab[0], curLab[1]))} Detection</h4><dl class="kv">
       <dt>Source</dt><dd>${d.product_name || d.source || i.source}</dd><dt>Satellite</dt><dd>${d.satellite || '—'}</dd>
       <dt>Detected</dt><dd>${d.observed_at ? new Date(d.observed_at).toLocaleString() : '—'}${d.age_hours_at_creation != null ? ` (${d.age_hours_at_creation} h old when opened)` : ''}</dd>
       <dt>Fire power</dt><dd>${d.frp_mw != null ? d.frp_mw + ' MW' : 'not provided'}</dd>
       </dl>
       <div class="note">${d.note || ''}</div></div>
-    <div class="sect"><h4>Decision</h4>${raw(actions.join('') || '<div class="sub">No actions available.</div>')}</div>
+    ${raw(fireDecision(i))}
     <div class="sect"><h4>Record</h4><div id="activity">${raw(activity(i.id))}</div></div>
     <div class="sect"><h4>Nearby</h4><div id="nearby" class="sub">Loading registered fire stations…</div><button class="btn sm" id="ctxMore" style="margin-top:6px">Load terrain and map features</button><div id="ctxOut"></div></div>
     <div class="sect"><h4>Field updates</h4>${raw((i.field_updates || []).length ? `<ul class="steps" style="padding-left:16px;margin:0;font-size:12.5px">${i.field_updates.map((u) => `<li>${esc(new Date(u.at).toLocaleTimeString())} · ${esc(u.by)}: ${esc(u.text)}</li>`).join('')}</ul>` : '<div class="sub">None.</div>')}</div>
     <div class="row2"><button class="btn sm" id="pdf">⬇ Report (PDF)</button></div>`;
-  $$('[data-v]', pane).forEach((b) => (b.onclick = () => act(() => api(`/fire/incidents/${i.id}/verify`, { method: 'POST', body: { decision: b.dataset.v, note: $('#vnote').value } }), 'Decision recorded')));
-  $('#auth')?.addEventListener('click', () => sheet('Authorise response notification', `<p>This authorises <b>${esc(i.code)}</b> for notification. It does <b>not</b> contact anyone by itself and does <b>not</b> dispatch a station. You choose each notification separately.</p><label class="f">Note<input type="text" id="authnote" placeholder="Reason / authority"></label>`, [{ label: 'Authorise', cls: 'primary', run: async () => { await api(`/fire/incidents/${i.id}/authorise`, { method: 'POST', body: { note: $('#authnote').value } }); await reload(); } }]));
-  $('#ack')?.addEventListener('click', () => act(() => api(`/fire/incidents/${i.id}/acknowledge`, { method: 'POST', body: { note: $('#anote').value } }), 'Acknowledgement recorded'));
-  $('#upd')?.addEventListener('click', () => act(() => api(`/fire/incidents/${i.id}/field-update`, { method: 'POST', body: { note: $('#unote').value } }), 'Update added'));
-  $('#resolve')?.addEventListener('click', () => sheet('Mark resolved', '<p>Close this incident as resolved?</p>', [{ label: 'Mark resolved', cls: 'primary', run: async () => { await api(`/fire/incidents/${i.id}/resolve`, { method: 'POST', body: { note: 'resolved' } }); await reload(); } }]));
-  $('#cancel')?.addEventListener('click', () => sheet('Cancel incident', '<p>Cancel this incident? This cannot be undone.</p>', [{ label: 'Cancel incident', cls: 'warn', run: async () => { await api(`/fire/incidents/${i.id}/cancel`, { method: 'POST', body: { note: 'cancelled' } }); await reload(); } }]));
+  $('#fEsc')?.addEventListener('click', () => escalateFire(i));
+  $('#fFalse')?.addEventListener('click', () => act(() => api(`/fire/incidents/${i.id}/verify`, { method: 'POST', body: { decision: 'reject', note: 'False alarm' } }), 'Marked as a false alarm'));
+  $('#fUndo')?.addEventListener('click', () => act(() => api(`/fire/incidents/${i.id}/verify`, { method: 'POST', body: { decision: 'needs_verification', note: 'Reopened' } }), 'Back in review'));
+  $('#fResolve')?.addEventListener('click', () => act(() => api(`/fire/incidents/${i.id}/resolve`, { method: 'POST', body: { note: 'Resolved' } }), 'Marked as resolved'));
   $('#pdf').onclick = () => import('./core.js').then((c) => c.download(`/fire/incidents/${i.id}/report.pdf`, `${i.code}-report.pdf`));
   api(`/fire/context?lat=${i.lat}&lon=${i.lon}&parts=stations`).then((c) => { const n = $('#nearby'); if (!n) return; n.innerHTML = c.stations.length ? `${c.stations.map((s) => `<div>🚒 <b>${esc(s.name)}</b> <span class="sub">${s.straight_line_km} km straight line · ${esc(s.source)}${s.verified ? '' : ' · unverified'}</span></div>`).join('')}` : '<div class="sub">No stations registered near here yet. Open the Route tab and press “Find stations”.</div>'; });
   $('#ctxMore').onclick = async () => { $('#ctxOut').innerHTML = '<div class="sub"><span class="spin"></span>Loading…</div>'; const c = await api(`/fire/context?lat=${i.lat}&lon=${i.lon}&parts=terrain,osm`).catch((e) => ({ err: e.message })); const o = c.osm || {}, t = c.terrain || {}; $('#ctxOut').innerHTML = c.err ? `<div class="note warn">${esc(c.err)}</div>` : `<dl class="kv"><dt>Elevation</dt><dd>${t.elevation_m ?? '—'} m ${lab('obs', 'OBSERVED')}</dd><dt>Slope</dt><dd>${t.slope_deg ?? '—'}°</dd><dt>Nearest road</dt><dd>${o.nearest_road ? esc((o.nearest_road.name || o.nearest_road.type) + ' · ' + o.nearest_road.distance_m + ' m') : 'none mapped'}</dd><dt>Nearest settlement</dt><dd>${o.nearest_settlement ? esc((o.nearest_settlement.name || '?') + ' · ' + o.nearest_settlement.distance_m + ' m') : 'none mapped'}</dd></dl><div class="sub">${esc(o.status === 'unavailable' ? 'Map features unavailable: ' + o.reason : 'OpenStreetMap + Copernicus DEM; mapping is incomplete.')}</div>`; };
+}
+
+// ---- the two decisions: Escalate or False alarm
+function fireDecision(i) {
+  const dis = ['admin', 'reviewer', 'officer'].includes(curRole()) ? '' : 'disabled';
+  const sent = ['DISPATCH_REQUESTED', 'DISPATCHED', 'MONITORING'].includes(i.status);
+  const tg = (i.notify?.telegram || []).filter((m) => m.mode === 'real' && m.kind === 'message').pop(), call = (i.ivr?.calls || []).filter((c) => !c.simulated).pop();
+  const say = { SENT: 'sent', FAILED: 'failed', COMPLETED: 'finished', INITIATED: 'placed', RINGING: 'ringing', ANSWERED: 'answered', BUSY: 'busy', NO_ANSWER: 'not answered' };
+  let body;
+  if (i.status === 'REJECTED' || i.status === 'CANCELLED') body = `<div class="banner2 grey"><b>Marked as a false alarm.</b></div><button class="btn" id="fUndo" ${dis}>↩ Undo, review it again</button>`;
+  else if (i.status === 'RESOLVED') body = '<div class="banner2 grey"><b>Resolved.</b></div>';
+  else if (sent) body = `<div class="banner2 green"><b>Escalated.</b><div class="sub">${[tg ? `Telegram: ${say[tg.status] || tg.status.toLowerCase()}` : '', call ? `Phone call: ${say[call.status] || call.status.toLowerCase()}${call.duration_s != null ? ` (${call.duration_s} s)` : ''}` : ''].filter(Boolean).join(' · ') || 'Response approved.'}</div></div>
+      <div class="row2"><button class="btn grow" id="fEsc" ${dis}>🚨 Send again</button><button class="btn" id="fResolve" ${dis}>✓ Mark resolved</button></div>`;
+  else body = `<div class="decide"><button class="btn danger-fill" id="fEsc" ${dis}><span>🚨</span><b>Escalate</b><small>Confirm the fire, tell the station on Telegram and phone the response contact</small></button>
+      <button class="btn ok-line" id="fFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>`;
+  return `<div class="sect"><h4>Your decision</h4>${body}${dis ? `<div class="sub">Your role (${esc(curRole())}) cannot decide. Switch to Reviewer, Officer or Admin in the full console.</div>` : ''}</div>`;
+}
+async function escalateFire(i0) {
+  const btn = $('#fEsc'); const again = btn.textContent.includes('again');
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1'; const old = btn.innerHTML;
+    btn.innerHTML = again ? 'Tap again to send' : '<span>🚨</span><b>Tap again to send</b><small>Telegram and a phone call go out now</small>';
+    setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.innerHTML = old; } }, 6000); return;
+  }
+  delete btn.dataset.armed; btn.disabled = true;
+  const id = i0.id;
+  const card = pop({ icon: '🚨', title: `Escalating ${i0.code}`, steps: ['Confirming the fire', 'Forecast and route to the nearest station', 'Approving the response', 'Sending to Telegram', 'Phoning the response contact', 'Finished'] });
+  const oks = [], fails = [];
+  const run = async (path, body) => { const j = await api(path, { method: 'POST', body }); return waitJob(j.job_id, null, 1500); };
+  try {
+    let i = await api('/fire/incidents/' + id);
+    if (i.status === 'DETECTED') i = await api(`/fire/incidents/${id}/verify`, { method: 'POST', body: { decision: 'needs_verification', note: 'Escalated' } });
+    if (['NEEDS_VERIFICATION', 'INCONCLUSIVE'].includes(i.status)) i = await api(`/fire/incidents/${id}/verify`, { method: 'POST', body: { decision: 'confirm', note: 'Confirmed by ' + curRole() + ' when escalating' } });
+    card.note(0, 'Confirmed as a fire', 'ok'); card.at(1);
+    if (!i.forecast || i.forecast.status === 'UNAVAILABLE') { card.note(1, 'Working out the spread…'); await run(`/fire/incidents/${id}/forecast`).catch(() => {}); }
+    if (i.route?.status !== 'OK') {
+      card.note(1, 'Finding the nearest fire station and the road route…');
+      await run(`/fire/incidents/${id}/stations/discover`, {}).catch(() => {}); await run(`/fire/incidents/${id}/route`, {}).catch(() => {});
+    }
+    i = await api('/fire/incidents/' + id); S.list[S.list.findIndex((x) => x.id === id)] = i;
+    card.note(1, i.route?.status === 'OK' ? `${i.route.station.name}: ${journeyText(i.route)}` : 'No route could be found', i.route?.status === 'OK' ? 'ok' : 'bad'); card.at(2);
+    if (i.status === 'CONFIRMED') await api(`/fire/incidents/${id}/authorise`, { method: 'POST', body: { note: 'Approved when escalating' } });
+    card.note(2, 'Response approved', 'ok'); card.at(3);
+    const tgBefore = ((await api('/fire/incidents/' + id)).notify?.telegram || []).length;
+    await run(`/fire/incidents/${id}/notify/telegram`, { mode: 'real', confirm_real: true, resend: again });
+    i = await api('/fire/incidents/' + id); const tg = (i.notify?.telegram || []).filter((m) => m.mode === 'real' && m.kind === 'message').pop();
+    if (tg?.status === 'SENT') { card.note(3, 'Sent to Telegram with the map images and report', 'ok'); oks.push('Telegram'); } else { card.note(3, tg?.error || 'Telegram did not accept it', 'bad'); fails.push('Telegram'); }
+    card.at(4);
+    const e = await api(`/fire/incidents/${id}/ivr`, { method: 'POST', body: { mode: 'real', confirm_real: true } });
+    if (e.provider_call_id && e.status !== 'FAILED') { const f = await followCall(card, 4, e.provider_call_id); (f.ok ? oks : fails).push('Phone call'); }
+    else { card.note(4, e.status === 'FAILED' ? 'The call did not go through' : 'Could not place the call', 'bad'); fails.push('Phone call'); }
+    await reload(id);
+    if (!oks.length) card.fail('Nothing could be sent. See the notes above.'); else card.done(`${oks.join(' and ')} done${fails.length ? `; ${fails.join(' and ')} did not work` : ''}.`);
+  } catch (err) { card.fail(err.status === 403 ? 'Your role is not allowed to do this. Use Reviewer, Officer or Admin.' : err.message); await reload(id).catch(() => {}); }
 }
 
 // ---- forecast
@@ -183,10 +231,10 @@ function route(i, pane) {
   const find = '<div class="row2"><button class="btn sm" id="findst">Find stations</button><button class="btn primary sm" id="calcrt">Calculate route</button></div>';
   if (!r) { pane.innerHTML = '<div class="empty"><b>No route yet</b>Looks up fire stations near the incident and compares road routes.</div>' + find; wireRoute(i); return; }
   if (r.status !== 'OK') { pane.innerHTML = `<div class="banner2 red"><b>${esc(r.status)}</b>: ${esc(r.reason || '')}</div>${find}`; wireRoute(i); return; }
-  pane.innerHTML = html`<div class="sect"><h4>🚒 ${r.station.name}</h4><div class="sub">${r.station.data_note} · ${r.station.source}</div><div class="big" style="margin:6px 0"><b style="font-size:26px;color:#14573c">${r.distance_km} km</b><span>about ${Math.round(r.duration_min)} min by road</span></div>
+  pane.innerHTML = html`<div class="sect"><h4>🚒 ${r.station.name}</h4><div class="sub">${r.station.data_note} · ${r.station.source}</div>${raw(journeyHtml(r))}<div class="sub">Total ${r.distance_km} km, about ${Math.round(r.duration_min)} min</div>${raw(legendHtml)}
       <div class="sub">Objective: ${r.objective}. Provider: ${r.provider}. Calculated ${new Date(r.calculated_at).toLocaleTimeString()}.</div>${raw(r.selected_manually ? '<div class="sub">Station chosen manually.</div>' : '')}
-      <div class="row2" style="margin-top:6px"><a class="btn sm" href="${esc(r.navigation_url)}" target="_blank" rel="noopener">Open in Google Maps</a></div></div>
-    <div class="sect"><h4>Candidates compared</h4><table class="t"><tr><th>Station</th><th>Straight</th><th>Road</th><th></th></tr>${raw(r.candidates.map((c) => `<tr><td>${esc(c.station_name)}</td><td>${esc(c.straight_line_km)} km</td><td>${c.distance_km != null ? esc(c.distance_km + ' km · ' + Math.round(c.duration_min) + ' min') : '<span class="chip red">' + esc(c.status) + '</span>'}</td><td>${c.selected ? '✓' : c.distance_km != null ? `<button class="btn sm" data-st="${esc(c.station_id)}">Use</button>` : ''}</td></tr>`).join(''))}</table></div>
+      <div class="row2" style="margin-top:6px"><a class="btn sm" href="${esc(r.navigation_url)}" target="_blank" rel="noopener">${WAY.drive} Directions by road</a>${raw(r.walk_url ? `<a class="btn sm" href="${esc(r.walk_url)}" target="_blank" rel="noopener">${WAY.walk} Walking directions</a>` : '')}</div></div>
+    <div class="sect"><h4>Candidates compared</h4><table class="t"><tr><th>Station</th><th>Straight</th><th>Road</th><th></th></tr>${raw(r.candidates.map((c) => `<tr><td>${esc(c.station_name)}</td><td>${esc(c.straight_line_km)} km</td><td>${c.distance_km != null ? esc(c.distance_km + ' km · ' + Math.round(c.duration_min) + ' min') + (c.walk_km ? ' ' + WAY.walk : '') : '<span class="chip red">' + esc(c.status) + '</span>'}</td><td>${c.selected ? '✓' : c.distance_km != null ? `<button class="btn sm" data-st="${esc(c.station_id)}">Use</button>` : ''}</td></tr>`).join(''))}</table></div>
     ${raw((r.reasons || []).length ? r.reasons.map((x) => `<div class="banner2 amber">${esc(x.text)}</div>`).join('') : '')}
     <div class="sub">Typical driving time, not live traffic.</div>${find}`;
   wireRoute(i);
@@ -212,13 +260,13 @@ function comms(i, pane) {
       ${raw(realTg.length ? `<table class="t">${realTg.map((m) => `<tr><td>${esc(m.kind === 'message' ? 'Message' : m.kind === 'report' ? 'PDF report' : m.kind + ' map')}</td><td>${chip(m.status)}</td><td class="sub">${m.error ? esc(m.error) : ''}</td></tr>`).join('')}</table>` : '')}
       ${raw(i.notify?.acknowledged ? `<div class="banner2 green" style="margin-top:6px">Acknowledged by ${esc(i.notify.acknowledged.by)}.</div>` : '')}</div>
     <div class="sect"><h4>📞 Phone call</h4><div class="sub">Calls <b>${esc(s?.ivr.response_contact || 'the response contact')}</b> (${esc(s?.ivr.response_number || 'number not set')}) and reads out the location, size, spread, nearest station and distance.</div>
-      <details style="margin:6px 0"><summary>What the call says</summary><div id="script" class="script">Loading…</div></details>
-      <div class="row2" style="margin:8px 0"><button class="btn" id="hear">▶ Hear it</button><button class="btn warn grow" id="callnow" ${dis} ${s?.ivr.real_ready ? '' : 'disabled'}>Call now</button></div>
+      <details style="margin:6px 0"><summary>What the call says</summary><div id="fireScript" class="script">Loading…</div></details>
+      <div class="row2" style="margin:8px 0"><button class="btn" id="fireHear">▶ Hear it</button><button class="btn warn grow" id="callnow" ${dis} ${s?.ivr.real_ready ? '' : 'disabled'}>Call now</button></div>
       ${raw(s?.ivr.real_ready ? '' : `<div class="banner2 amber">Phone calls are not set up yet. Add to .env: ${esc(missing.join(', ') || 'Twilio details')}.${s?.ivr.dimension ? ' ' + esc(s.ivr.dimension) : ''}</div>`)}
       ${raw(realCalls.map((c) => `<div class="callrow">${chip(c.status)} <span class="sub">${c.history.map((h) => esc(h.status.toLowerCase())).join(' → ')}</span></div>`).join(''))}</div>
     <div class="sect"><h4>Record</h4><div id="activity">${raw(activity(i.id))}</div></div>`;
-  api(`/fire/incidents/${i.id}/ivr/script`).then((r) => { const el = $('#script'); if (el) el.textContent = r.script; S.script = r.script; }).catch(() => { const el = $('#script'); if (el) el.textContent = 'The message could not be prepared.'; });
-  $('#hear').onclick = () => { if (!('speechSynthesis' in window) || !S.script) return toast('This browser cannot play the message', 'error'); if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; } const u = new SpeechSynthesisUtterance(S.script); u.lang = 'en-IN'; u.rate = 0.95; speechSynthesis.speak(u); };
+  api(`/fire/incidents/${i.id}/ivr/script`).then((r) => { const el = $('#fireScript'); if (el) el.textContent = r.script; S.script = r.script; }).catch(() => { const el = $('#fireScript'); if (el) el.textContent = 'The message could not be prepared.'; });
+  $('#fireHear').onclick = () => { if (!('speechSynthesis' in window) || !S.script) return toast('This browser cannot play the message', 'error'); if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; } const u = new SpeechSynthesisUtterance(S.script); u.lang = 'en-IN'; u.rate = 0.95; speechSynthesis.speak(u); };
   const approve = async () => { if (i.status === 'CONFIRMED') await api(`/fire/incidents/${i.id}/authorise`, { method: 'POST', body: { note: 'approved from the alert panel' } }); };
   $('#tgreal').onclick = () => sheet('Send to Telegram', `<p>This sends the incident, three map images and a PDF report to <b>${esc(s.telegram.chat_masked)}</b>.</p><p class="sub">It will not be sent twice unless you choose to.</p>`, [{ label: 'Send now', cls: 'primary', run: async () => {
     await approve();

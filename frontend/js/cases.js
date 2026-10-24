@@ -18,9 +18,11 @@ export function clear() { S.layer?.clearLayers(); clearInterval(S.timer); S.c = 
 export async function mountList(el, onOpen) {
   try {
     const list = await api('/forest-change/cases');
+    if (!list.length) return 0;
     el.innerHTML = list.map((c) => `<button class="case-card" data-id="${esc(c.id)}"><span class="case-ic">🏭</span><span class="grow"><b>${esc(c.title)}</b><small>${esc(c.where)}</small><em>${esc(c.summary)}</em></span><span class="tag">Example</span></button>`).join('');
     $$('.case-card', el).forEach((b) => (b.onclick = () => onOpen(b.dataset.id)));
-  } catch (e) { el.innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
+    return list.length;
+  } catch { return 0; }
 }
 
 export async function open(id, back) {

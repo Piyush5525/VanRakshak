@@ -169,7 +169,7 @@ def spoken(inc: dict[str, Any]) -> str:
         parts.append("Villages close by: " + ", ".join(f"{p['name']}, {round(p['distance_km'])} kilometres away" for p in near) + ".")
     if r.get("status") == "OK":
         st = r["station"]
-        parts.append(f"The nearest fire station is {st['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, st['lat'], st['lon'])} of the fire, about {geoinfo.say_minutes(r['duration_min'])} by road.")
+        parts.append(f"The nearest fire station is {st['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, st['lat'], st['lon'])} of the fire, {geoinfo.say_journey(r)}.")
     parts.append(f"The location is {_num(abs(lat))} degrees {'north' if lat >= 0 else 'south'}, {_num(abs(lon))} degrees {'east' if lon >= 0 else 'west'}. The incident code is {inc['code'].replace('-', ' ')}.")
     parts.append("Details and the route are in the VanRakshak app and on Telegram. Please respond now.")
     return " ".join(parts)

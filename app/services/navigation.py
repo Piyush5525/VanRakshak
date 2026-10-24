@@ -66,7 +66,7 @@ def evaluate_routes(routes: list[dict[str, Any]], hazards: list[dict[str, Any]],
                     reasons.append({"code": h["kind"], "hazard_id": h["id"], "text": f"Penalised (+{int(UNVERIFIED_PENALTY_MIN)} min): {state} {h['kind'].replace('_', ' ')} near this route, {when}.{stale} Verify before use."})
         if weather_flags:
             reasons.extend({"code": "weather_advisory", "text": f"Advisory (not a verified hazard): {f}"} for f in weather_flags)
-        evaluated.append({"index": i, "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": None if blocked else round(r["duration_min"] + penalty, 1), "status": "blocked" if blocked else "penalised" if penalty else "no_recorded_hazard", "reasons": reasons, "geometry": geom, "steps": r.get("steps"), "via": r.get("via")})
+        evaluated.append({"index": i, "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": None if blocked else round(r["duration_min"] + penalty, 1), "status": "blocked" if blocked else "penalised" if penalty else "no_recorded_hazard", "reasons": reasons, "geometry": geom, "steps": r.get("steps"), "via": r.get("via"), "segments": r.get("segments"), "drive_km": r.get("drive_km"), "walk_km": r.get("walk_km"), "drive_min": r.get("drive_min"), "walk_min": r.get("walk_min")})
     usable = sorted([e for e in evaluated if e["status"] != "blocked"], key=lambda e: e["adjusted_duration_min"])
     recommended = usable[0]["index"] if usable else None
     for e in evaluated:

@@ -35,6 +35,9 @@ def test_example_incidents_are_chosen_one_by_one_and_the_map_stays_clear_until_t
     page.wait_for_selector("#stabs", timeout=30000)
     page.wait_for_function("document.querySelector('#fireBody').innerText.includes('Confirmed')", timeout=240000)
     assert page.locator(".leaflet-marker-icon").count() >= 1
+    # one decision per incident: Escalate or False alarm
+    page.click("#stabs button[data-k=overview]")
+    assert page.locator("#fEsc").count() == 1 and page.locator("#fFalse").count() == 1
     page.click("#stabs button[data-k=forecast]")
     page.wait_for_selector("#hz")
     txt = page.inner_text("#pane")
@@ -45,15 +48,15 @@ def test_example_incidents_are_chosen_one_by_one_and_the_map_stays_clear_until_t
     page.click("#stabs button[data-k=comms]")
     page.wait_for_function("document.querySelector('#fireBody').innerText.includes('What the call says')")
     page.click("#pane details summary")
-    page.wait_for_function("document.querySelector('#script').innerText.includes('forest fire has been detected')", timeout=20000)
-    script = page.inner_text("#script")
+    page.wait_for_function("document.querySelector('#fireScript').innerText.includes('forest fire has been detected')", timeout=20000)
+    script = page.inner_text("#fireScript")
     assert "degrees north" in script and "hectares" in script
     assert page.locator("#tgreal").is_disabled() and page.locator("#callnow").is_disabled()   # no Telegram / Twilio keys on this server
     assert "Phone calls are not set up yet" in page.inner_text("#pane")
-    assert page.locator("#hear").count() == 1
+    assert page.locator("#fireHear").count() == 1
     assert page.locator("#logBtn, #dock").count() == 0
     # back to the list: the map is clear again, and the examples can be removed without touching real incidents
-    page.click("#fback")
+    page.click("#fireBack")
     assert page.locator(".leaflet-marker-icon").count() == 0
     page.click("#rmScn")
     page.click("#sheet [data-a='0']")

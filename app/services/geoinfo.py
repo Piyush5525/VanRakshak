@@ -76,6 +76,18 @@ def direction_from(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
     return compass(bearing_deg(lat1, lon1, lat2, lon2))
 
 
+def say_journey(r: dict) -> str:
+    """'about 35 minutes by road' or 'about 35 minutes by road, then about 400 metres on foot'."""
+    drive_min = r.get("drive_min") if r.get("drive_min") is not None else r.get("duration_min", 0)
+    out = f"about {say_minutes(drive_min)} by road"
+    if (r.get("walk_km") or 0) > 0:
+        m = round(r["walk_km"] * 1000, -1)
+        out += f", then about {int(m)} metres on foot" if m < 1000 else f", then about {r['walk_km']:.1f} kilometres on foot"
+    elif r.get("drive_km") == 0 and r.get("walk_min"):
+        out = f"about {say_minutes(r['walk_min'])} on foot"
+    return out
+
+
 def say_minutes(m: float) -> str:
     m = int(round(m))
     if m < 60:

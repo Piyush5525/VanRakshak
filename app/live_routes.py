@@ -130,6 +130,60 @@ def set_site(incident_id: str, payload: SiteInfo, role: Role = Depends(require_r
     return site
 
 
+def _inc_or_404(incident_id: str) -> dict[str, Any]:
+    inc = get_one("incidents", "id", incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return inc
+
+
+@api.post("/incidents/{incident_id}/escalate")
+def escalate_incident(incident_id: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER, Role.OFFICER))):
+    """Send the report to Telegram and phone the response contact. Real sends: calling this is the confirmation."""
+    from app.services import escalate
+    return escalate.escalate(_inc_or_404(incident_id), role.value)
+
+
+@api.get("/incidents/{incident_id}/escalate/script")
+def escalate_script(incident_id: str, role: Role = Depends(require_roles(*READ))):
+    from app.services import escalate
+    return {"script": escalate.texts(_inc_or_404(incident_id))[1]}
+
+
+@api.post("/incidents/{incident_id}/false-alarm")
+def false_alarm(incident_id: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER, Role.OFFICER))):
+    _inc_or_404(incident_id)
+    update("incidents", "id", incident_id, {"status": "DISMISSED", "updated_at": now()})
+    audit(role.value, "incident_false_alarm", "incident", incident_id, {})
+    return {"status": "DISMISSED"}
+
+
+@api.post("/incidents/{incident_id}/reopen")
+def reopen_incident(incident_id: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER, Role.OFFICER))):
+    _inc_or_404(incident_id)
+    update("incidents", "id", incident_id, {"status": "DETECTED", "updated_at": now()})
+    audit(role.value, "incident_reopened", "incident", incident_id, {})
+    return {"status": "DETECTED"}
+
+
+@api.delete("/incidents/{incident_id}")
+def delete_incident(incident_id: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER))):
+    from app.db.database import connection
+    _inc_or_404(incident_id)
+    with connection() as conn:
+        conn.execute("DELETE FROM incidents WHERE id = ?", (incident_id,))
+    audit(role.value, "incident_deleted", "incident", incident_id, {})
+    return {"deleted": incident_id}
+
+
+@api.get("/calls/status")
+def call_status(call_id: str = Query(min_length=1, max_length=64), role: Role = Depends(require_roles(*READ))):
+    """The phone provider's own view of a call placed from this system (used to show ringing / connected / finished live)."""
+    from app.services import fireivr
+    d = fireivr.remote_detail(settings.ivr_provider, call_id)
+    return d or {"status": None, "duration_s": None, "hangup": None}
+
+
 @api.delete("/incidents/{incident_id}/site")
 def clear_site(incident_id: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER))):
     inc = get_one("incidents", "id", incident_id)

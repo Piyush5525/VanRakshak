@@ -122,7 +122,7 @@ def compose(inc: dict[str, Any]) -> str:
         lines.append(f"\nAmbient air (MODELLED, not smoke from this fire): PM2.5 {aq['pm2_5_ug_m3']['now']} µg/m³")
     r = inc.get("route") or {}
     if r.get("status") == "OK":
-        lines.append(f"\n<b>Nearest station by road:</b> {_e(r['station']['name'])} ({_e(r['station']['source'])}, unverified)\n{r['distance_km']} km, about {round(r['duration_min'])} min (typical road estimate; closures and availability not verified)")
+        lines.append(f"\n<b>Nearest station by road:</b> {_e(r['station']['name'])} ({_e(r['station']['source'])}, unverified)\n{r['distance_km']} km, about {round(r['duration_min'])} min{(' (🚗 ' + str(r['drive_km']) + ' km by road + 🚶 ' + str(r['walk_km']) + ' km on foot)') if r.get('walk_km') else ''} (typical estimate; closures and availability not verified)")
     else:
         lines.append("\nRoute: not calculated" + (f" ({_e(r.get('reason'))})" if r.get("reason") else ""))
     link = public_link()

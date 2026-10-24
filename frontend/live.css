@@ -145,3 +145,43 @@ details.more{margin:10px 0}details.more summary{cursor:pointer;font-weight:700}.
 .rose{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;align-items:end;height:64px;margin-top:6px}.rose .rb{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;font-size:10px;color:#5b6b66}.rose .rb i{width:100%;max-width:22px;background:#b9cbc1;border-radius:4px 4px 0 0}.rose .rb.top i{background:#7b4fb0}.rose .rb.top{color:#4b2a7a;font-weight:700}
 body.placing .leaflet-container{cursor:crosshair!important}
 .row-item .grow b,.row-item .grow small{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere}
+.pop-steps li{align-items:flex-start}.pop-steps li i{margin-top:1px}.pop-steps .st{display:flex;flex-direction:column;min-width:0}.pop-steps .st small{font-weight:400;color:#5b6b66;font-size:12px;min-height:0}.pop-steps .st small:empty{display:none}.pop-steps .st small.bad{color:#b3122a}.pop-steps .st small.ok{color:#0a5c36}
+
+/* decisions, permits, forms: one consistent look */
+.decide{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.decide .btn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:12px;border-radius:14px;height:auto;white-space:normal;border:2px solid transparent;cursor:pointer;font:inherit;transition:transform .12s,box-shadow .12s}
+.decide .btn span{font-size:22px}.decide .btn b{font-size:15px}.decide .btn small{font-size:11.5px;opacity:.85;font-weight:400;line-height:1.3}
+.decide .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 14px rgba(0,0,0,.14)}.decide .btn:disabled{opacity:.5;cursor:not-allowed}
+.danger-fill{background:#c0252d;color:#fff;border-color:#c0252d}.ok-line{background:#fff;color:#0a5c36;border-color:#9fc3af}
+.banner2.grey{background:#eef1ef;color:#44524b}
+.permit{border:1px solid #d9e4de;border-left-width:5px;border-radius:12px;padding:10px;margin-bottom:8px;background:#fff}.permit.ok{border-left-color:#2e9e5b}.permit.warn{border-left-color:#f4802a}.permit.bad{border-left-color:#d7263d}
+.permit-h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.permit-h b{min-width:0;overflow-wrap:anywhere}.permit-f{font-size:12.5px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.link-x{border:0;background:none;color:#b3122a;cursor:pointer;font:inherit;font-size:12.5px;padding:0;margin-left:auto}.link-x:hover{text-decoration:underline}
+.permit-form{display:grid;gap:8px;background:#f6f9f7;border-radius:12px;padding:10px;margin-top:8px}
+.btn.danger{color:#b3122a;border-color:#e3b9bc;background:#fff}.btn.danger:hover{background:#fdeaea}
+details.more summary{cursor:pointer;color:#5b6b66;font-size:13px}
+/* the "Check a new area" fold-out: one arrow, no focus box */
+details.scanbox summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;outline:none;padding:4px 0}
+details.scanbox summary::-webkit-details-marker{display:none}
+details.scanbox summary::before{content:"＋";display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#0a5c36;color:#fff;font-size:14px;flex:none}
+details.scanbox[open] summary::before{content:"−"}
+details.scanbox summary:focus-visible{outline:2px solid #2e9e5b;outline-offset:3px;border-radius:8px}
+.btn.big{width:100%;margin-top:10px}
+/* emission figures: a tidy row with its own remove button */
+.fem{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,.8fr) minmax(0,.8fr);gap:6px;margin-bottom:8px;align-items:center}
+.fem .s{grid-column:2/-1}.fem input{width:100%;min-width:0;box-sizing:border-box;height:36px;padding:0 8px;border:1px solid #cfd8d3;border-radius:10px;font:inherit;font-size:13px;background:#fff}
+.fem .rm{width:28px;height:28px;border-radius:50%;border:1px solid #e3b9bc;background:#fff;color:#b3122a;font-size:16px;line-height:1;cursor:pointer;padding:0}.fem .rm:hover{background:#fdeaea}
+#rightBody input,#rightBody select,#forestBody input,#forestBody select,#fireBody input,#fireBody select{max-width:100%;box-sizing:border-box}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid #2e9e5b;outline-offset:2px}
+.back:focus,.back:active{outline:none;background:transparent}.back{background:none;border:0;color:#0a5c36;font:inherit;font-weight:600;cursor:pointer;padding:6px 0;margin-bottom:4px}
+.sub-tabs{margin:10px 0;gap:0;justify-content:space-between}.sub-tabs button{flex:1 1 auto;padding:7px 6px;text-align:center}
+.decide .ok-line{background:#fff!important;border:2px solid #8fb9a1!important;color:#0a5c36!important}.decide .danger-fill{background:#c0252d!important;border:2px solid #c0252d!important;color:#fff!important}
+.decide .btn{min-height:112px;justify-content:flex-start}
+
+/* journeys: road and walking path, each with its own icon */
+.journey{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:8px 0}.journey .plus{align-self:center;color:#7a8a84;font-weight:700}
+.journey .leg{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:8px;align-items:center;background:#f1f6f3;border-radius:12px;padding:8px 12px;min-width:0}
+.journey .leg i{grid-row:1/3;font-style:normal;font-size:22px}.journey .leg b{font-size:16px;line-height:1.1}.journey .leg small{color:#5b6b66;font-size:12px}
+.journey .leg.walk{background:#fff1e8}.journey .leg.walk b{color:#b34700}
+.routeleg .ln{display:inline-block;width:22px;height:0;border-top:5px solid #14573c;border-radius:3px;vertical-align:middle;margin-right:6px}.routeleg .ln.walk{border-top:5px dotted #e8590c}
+.seg-ic{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:14px;background:#fff;border:2px solid #14573c;box-shadow:0 2px 6px rgba(0,0,0,.3)}.seg-ic.walk{border-color:#e8590c}

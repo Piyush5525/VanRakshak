@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     telegram_polling: bool = False           # opt-in: receive button presses via getUpdates (do NOT enable if another app uses this bot)
     telegram_authorised_chat_ids: str = ""    # extra chat ids (comma list) allowed to press buttons; TELEGRAM_CHAT_ID is always allowed
     ivr_provider: str = "simulated"           # simulated | twilio | omnidimension
+    enable_examples: bool = False             # example incidents and case studies are synthetic: off unless this is set (tests turn it on)
     omnidim_api_key: str | None = None
     omnidim_agent_id: int | None = None       # the voice agent that speaks the alert
     omnidim_from_number_id: int | None = None # optional: which of your OmniDimension numbers calls out

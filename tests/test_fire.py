@@ -308,7 +308,7 @@ def test_api_create_from_real_feed_only_and_workflow_permissions():
     assert client.post(f"/api/v1/fire/incidents/{iid}/authorise", headers=ADMIN, json={"note": ""}).status_code == 409
     assert client.post(f"/api/v1/fire/incidents/{iid}/verify", headers={"X-Role": "read_only"}, json={"decision": "confirm"}).status_code == 403
     assert client.post(f"/api/v1/fire/incidents/{iid}/verify", headers={"X-Role": "reviewer"}, json={"decision": "confirm", "note": "ranger saw smoke"}).json()["status"] == "CONFIRMED"
-    assert client.post(f"/api/v1/fire/incidents/{iid}/authorise", headers={"X-Role": "reviewer"}, json={"note": ""}).status_code == 403  # reviewers verify; officers/admins authorise
+    assert client.post(f"/api/v1/fire/incidents/{iid}/authorise", headers={"X-Role": "analyst"}, json={"note": ""}).status_code == 403  # analysts cannot approve a response
     assert client.post(f"/api/v1/fire/incidents/{iid}/authorise", headers=ADMIN, json={"note": ""}).json()["status"] == "DISPATCH_REQUESTED"
     assert client.post(f"/api/v1/fire/incidents/{iid}/notify/telegram", headers=ADMIN, json={"mode": "real"}).status_code == 409  # no confirm flag
     assert client.post(f"/api/v1/fire/incidents/{iid}/ivr", headers=ADMIN, json={"mode": "real", "confirm_real": True}).status_code == 409  # provider not configured
@@ -404,3 +404,16 @@ def test_omnidimension_short_connection_is_not_reported_as_answered(monkeypatch)
 
     d = fireivr.remote_detail("omnidimension", "5", Fake())
     assert d["status"] == "NO_ANSWER" and d["duration_s"] == 1
+
+
+def test_a_false_alarm_can_be_undone_but_a_resolved_incident_stays_closed():
+    inc = new_incident(demo=True)
+    iid = inc["id"]
+    assert client.post(f"/api/v1/fire/incidents/{iid}/verify", headers={"X-Role": "reviewer"}, json={"decision": "reject", "note": "False alarm"}).json()["status"] == "REJECTED"
+    back = client.post(f"/api/v1/fire/incidents/{iid}/verify", headers={"X-Role": "reviewer"}, json={"decision": "needs_verification", "note": "Reopened"}).json()
+    assert back["status"] == "NEEDS_VERIFICATION" and back["closed_at"] is None
+    inc2 = new_incident(demo=True, status="CONFIRMED")
+    for target in ("MONITORING", "RESOLVED"):
+        fireops.transition(inc2["id"], target, "admin")
+    with pytest.raises(fireops.WorkflowError):
+        fireops.transition(inc2["id"], "NEEDS_VERIFICATION", "admin")

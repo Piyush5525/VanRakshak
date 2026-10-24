@@ -35,7 +35,7 @@ fw._ingest(run, [{"geometry": sq(81.01, 21.71, 0.004), "area_ha": 3.4, "est_date
 def seeded():
     tmp = tempfile.mkdtemp(prefix="rakshak-forest-e2e-")
     port = free_port()
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{tmp}/e2e.db", "REPORT_OUTPUT_DIR": f"{tmp}/r", "RASTER_DIR": f"{tmp}/ras", "MODEL_DIR": f"{tmp}/m", "EVIDENCE_DIR": f"{tmp}/ev", "ENVIRONMENT": "test", "AUTH_MODE": "dev_header", "RATE_LIMIT_PER_MINUTE": "0", "PYTHONUTF8": "1", **{k: "" for k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "OMNIDIM_API_KEY", "OMNIDIM_AGENT_ID", "OMNIDIM_FROM_NUMBER_ID", "IVR_RESPONSE_NUMBER", "ALERT_PHONE_NUMBER")}, "ROUTING_PROVIDER": "unconfigured"}
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{tmp}/e2e.db", "REPORT_OUTPUT_DIR": f"{tmp}/r", "RASTER_DIR": f"{tmp}/ras", "MODEL_DIR": f"{tmp}/m", "EVIDENCE_DIR": f"{tmp}/ev", "ENVIRONMENT": "test", "AUTH_MODE": "dev_header", "RATE_LIMIT_PER_MINUTE": "0", "ENABLE_EXAMPLES": "true", "OSM_DISABLED": "true", "PYTHONUTF8": "1", **{k: "" for k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "OMNIDIM_API_KEY", "OMNIDIM_AGENT_ID", "OMNIDIM_FROM_NUMBER_ID", "IVR_RESPONSE_NUMBER", "ALERT_PHONE_NUMBER")}, "ROUTING_PROVIDER": "unconfigured"}
     subprocess.run([sys.executable, "-c", SEED], cwd=ROOT, env=env, check=True)
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port), "--log-level", "warning"], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(60):
@@ -51,55 +51,69 @@ def seeded():
     proc.kill()
 
 
-def test_tree_loss_panel_shows_history_lets_you_edit_a_spot_and_alerts_inline(seeded, browser):  # noqa: F811
+def test_one_decision_per_spot_permits_with_exact_details_and_everything_can_be_undone(seeded, browser):  # noqa: F811
     ctx = browser.new_context(viewport={"width": 1500, "height": 950})
     ctx.add_init_script("localStorage.setItem('rk.role','admin')")
     page = ctx.new_page()
     problems: list[str] = []
     page.on("pageerror", lambda e: problems.append(f"pageerror: {e}"))
     page.goto(seeded + "/live", wait_until="load")
-    # the tree panel is the front door: three layer switches off, nothing drawn, no event-log clutter
+    # opening the tab shows only the list: no history block, no pins, nothing drawn
     page.wait_for_selector("#forestBody .row-item")
+    body = page.inner_text("#forestBody").lower()
+    assert "tree cover over time" not in body and "check a new area" in body
     assert not page.is_checked("#showCover") and page.locator(".leaflet-marker-icon").count() == 0
-    assert page.locator("#logBtn, #dock").count() == 0
-    # step through the seeded history: choosing a step turns the history layer on
-    page.click("#snap button[data-s='90']")
-    page.wait_for_function("document.querySelector('.stat3').innerText.includes('100.0 ha')")
-    assert page.is_checked("#showCover")
-    page.click("#snap button[data-s='30']")
-    page.wait_for_function("document.querySelector('.stat3').innerText.includes('97.0 ha')")
-    page.click("#snap button[data-s='0']")
-    page.wait_for_function("document.querySelector('.stat3').innerText.includes('93.0 ha')")
     for d in ("7", "30", "90"):
         page.click(f"#win button[data-d='{d}']")
     page.click("#win button[data-d='c']")
     assert page.locator("#cFrom").count() == 1
     page.click("#win button[data-d='90']")
-    # open the spot: it appears on the map, and the permit check says "no record found" without calling it illegal
-    assert page.locator(".pin.tree").count() == 0
+    # choosing the spot puts it on the map and shows its permit status, the history and ONE decision
     page.click("#forestBody .row-item")
-    page.wait_for_selector("#stat")
+    page.wait_for_selector("#fcEsc")
     assert page.locator(".pin.tree").count() == 1
     text = page.inner_text("#forestBody")
-    assert "No government record" in text and "does not mean the work is illegal" in text
-    assert text.lower().count("illegal") == 1   # only inside the "does NOT mean illegal" warning
-    assert "first." in text and "practice" not in text.lower() and "simulat" not in text.lower()
-    page.select_option("#cat", "suspected_felling")
-    page.click("#stat button[data-s='CONFIRMED']")
-    page.wait_for_function("!document.querySelector('#forestBody').innerText.includes('first.')")
-    # the phone message is written out in full
-    page.click("#forestBody details summary")
-    page.wait_for_function("document.querySelector('#script').innerText.includes('tree cover lost')", timeout=15000)
-    # sending takes two taps; the result appears right under the button
-    page.click("#send")
-    assert "Tap again" in page.inner_text("#send")
-    page.click("#send")
-    page.wait_for_selector("#sendRes .res")
-    assert "Dashboard" in page.inner_text("#sendRes") and "sent" in page.inner_text("#sendRes")
-    page.wait_for_function("document.querySelector('#recAct').innerText.includes('dashboard')", timeout=15000)
-    # dismiss it as not a loss: it leaves the list
-    page.click("#stat button[data-s='FALSE_POSITIVE']")
-    page.click("#back")
+    assert "No permit in the register covers this spot" in text and "not proof that the work is illegal" in text
+    assert "tree cover over time" in text.lower() and text.lower().count("illegal") == 1
+    assert page.locator("#fcEsc").count() == 1 and page.locator("#fcFalse").count() == 1
+    assert page.locator("#cat, #stat, #send, .chn").count() == 0       # the old multi-option controls are gone
+    page.click("#snap button[data-s='90']")
+    page.wait_for_function("document.querySelector('.stat3').innerText.includes('100.0 ha')")
+    assert page.is_checked("#showCover")
+    # a permit someone knows about is shown with its exact details, and can be taken away again
+    page.click("#pAdd")
+    page.fill("#pAuth", "State Forest Department")
+    page.fill("#pNo", "FC/2026/114")
+    page.fill("#pName", "Quarry access road")
+    page.fill("#pFrom", "2026-01-01")
+    page.fill("#pTo", "2027-01-01")
+    page.fill("#pUrl", "https://example.gov.in/permits/114")
+    page.click("#pSave")
+    page.wait_for_selector(".permit")
+    permit = page.inner_text(".permit")
+    assert "FC/2026/114" in permit and "State Forest Department" in permit and "Quarry access road" in permit and "Issued" in permit and "Open the source document" in permit
+    assert page.get_attribute(".permit a", "href") == "https://example.gov.in/permits/114"
+    page.click("[data-rm]")
+    page.wait_for_selector(".banner2.red")
+    assert page.locator(".permit").count() == 0
+    # Escalate asks once more, then runs the whole routing with a live card; nothing is configured here, so it says so
+    page.click("#fcEsc")
+    assert "Tap again" in page.inner_text("#fcEsc")
+    page.click("#fcEsc")
+    page.wait_for_selector(".pop.bad", timeout=60000)
+    card = page.inner_text(".pop")
+    assert "Escalating FC-" in card and "Telegram is not set up" in card and "Phone calls are not set up" in card
+    page.wait_for_function("document.querySelector('#forestBody').innerText.includes('Escalated.')")
+    page.click("#fcUndo")
+    page.wait_for_selector("#fcFalse")
+    # False alarm closes it; undo brings it back; remove deletes it
+    page.click("#fcFalse")
+    page.wait_for_function("document.querySelector('#forestBody').innerText.includes('Marked as a false alarm')")
+    page.click("#fcUndo")
+    page.wait_for_selector("#fcEsc")
+    page.click("#forestBody details.more summary")
+    page.click("#fcDel")
+    page.click("#fcDel")
     page.wait_for_function("document.querySelector('#forestBody').innerText.includes('No loss spots')")
     assert problems == []
     ctx.close()

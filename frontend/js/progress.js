@@ -14,7 +14,7 @@ export function pop({ icon, title, steps }) {
   const el = document.createElement('div');
   el.className = 'pop';
   el.innerHTML = `<div class="pop-h"><span class="pop-ic">${icon}</span><b>${esc(title)}</b><button class="pop-x" aria-label="Close">×</button></div>
-    <ol class="pop-steps">${steps.map((s) => `<li><i></i><span>${esc(s)}</span></li>`).join('')}</ol><div class="pop-msg"></div>`;
+    <ol class="pop-steps">${steps.map((s) => `<li><i></i><span class="st"><b>${esc(s)}</b><small></small></span></li>`).join('')}</ol><div class="pop-msg"></div>`;
   host().appendChild(el);
   const items = [...el.querySelectorAll('li')];
   let cur = -1, over = false;
@@ -25,6 +25,8 @@ export function pop({ icon, title, steps }) {
     at(i) { if (!over && i > cur) paint(Math.min(i, items.length - 1)); return ctl; },
     done(t) { if (over) return; over = true; items.forEach((x) => (x.className = 'done')); el.classList.add('ok'); msg(t); setTimeout(close, 6000); },
     fail(t) { if (over) return; over = true; if (cur >= 0) items[cur].className = 'bad'; el.classList.add('bad'); msg(t); setTimeout(close, 12000); },
+    // a short line under a step: what actually happened there ("Sent to Telegram", "Ringing", "Call finished, 14 s")
+    note(i, t, tone) { const el = items[i]?.querySelector('small'); if (el) { el.textContent = t || ''; el.className = tone || ''; } return ctl; },
     get over() { return over; },
     close,
   };

@@ -4,6 +4,8 @@ import { config } from './map.js';
 import * as FIRE from './fire.js';
 import * as FOREST from './forest.js';
 import * as CASES from './cases.js';
+import { pop } from './progress.js';
+import { followCall } from './escalate.js';
 import * as FACTORY from './factory.js';
 
 const INDIA = [[6.5, 68.1], [37.1, 97.5]];
@@ -142,10 +144,10 @@ function paintList() {
     <div class="list">${open.length ? open.map((i) => { const [kn, em] = kindOf(i), [st, c] = STATUS[i.status] || [i.status, '']; return raw(`<button class="row-item" data-id="${esc(i.id)}"><span style="font-size:20px">${em}</span><span class="grow"><b>${esc(i.title)}</b><small>${esc(kn)} · ${esc(ago(new Date(i.created_at).getTime()))}</small></span><span class="chip ${c}">${esc(st)}</span></button>`); }) : raw('<div class="empty"><b>No incidents yet</b>Press “Mark an incident”, then click the place on the map.</div>')}</div>
     <h3 style="margin-top:16px">Factory checks</h3>
     <div id="facEntry"></div><div id="facList" class="list"></div>
-    <h3 style="margin-top:16px">Case studies</h3><div class="sub">What happens when a factory is built beside, or by clearing, a forest.</div>
-    <div id="caseList" class="cases"></div>
+    <div id="caseWrap" hidden><h3 style="margin-top:16px">Case studies</h3><div class="sub">What happens when a factory is built beside, or by clearing, a forest.</div>
+    <div id="caseList" class="cases"></div></div>
     `;
-  CASES.mountList($('#caseList'), (id) => CASES.open(id, paintList));
+  CASES.mountList($('#caseList'), (id) => CASES.open(id, paintList)).then((n) => { if (n) $('#caseWrap').hidden = false; });
   FACTORY.mountEntry($('#facEntry'), () => FACTORY.start(paintList));
   FACTORY.mountList($('#facList'), paintList);
   $('#mark').onclick = startMarking;
@@ -179,6 +181,33 @@ function onPlace(e) {
   };
 }
 
+// the same two decisions as everywhere else: Escalate or False alarm
+function incDecision(i) {
+  const role = localStorage.getItem('rk.role') || 'reviewer', can = ['admin', 'reviewer', 'officer'].includes(role), dis = can ? '' : 'disabled';
+  const esc_ = i.evidence?.escalation;
+  let body;
+  if (i.status === 'DISMISSED') body = `<div class="banner2 grey"><b>Marked as a false alarm.</b></div><button class="btn" id="incUndo" ${dis}>↩ Undo, review it again</button>`;
+  else if (esc_) body = `<div class="banner2 green"><b>Escalated.</b><div class="sub">Telegram: ${esc(({ SENT: 'sent', FAILED: 'failed', NOT_CONFIGURED: 'not set up' })[esc_.telegram?.status] || '–')} · Phone call: ${esc(({ INITIATED: 'placed', FAILED: 'failed', NOT_CONFIGURED: 'not set up' })[esc_.call?.status] || '–')}</div></div><div class="row2"><button class="btn grow" id="incEsc" ${dis}>🚨 Send again</button><button class="btn" id="incUndo" ${dis}>↩ Undo</button></div>`;
+  else body = `<div class="decide"><button class="btn danger-fill" id="incEsc" ${dis}><span>🚨</span><b>Escalate</b><small>Tell the response team on Telegram and phone the response contact</small></button><button class="btn ok-line" id="incFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>`;
+  return `<div class="sect"><h4>Your decision</h4>${body}${can ? '' : `<div class="sub">Your role (${esc(role)}) cannot decide. Switch to Reviewer, Officer or Admin in the full console.</div>`}</div>`;
+}
+async function escalateIncident(i) {
+  const btn = $('#incEsc'); const again = btn.textContent.includes('again');
+  if (!btn.dataset.armed) { btn.dataset.armed = '1'; const old = btn.innerHTML; btn.innerHTML = again ? 'Tap again to send' : '<span>🚨</span><b>Tap again to send</b><small>Telegram and a phone call go out now</small>'; setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.innerHTML = old; } }, 6000); return; }
+  delete btn.dataset.armed; btn.disabled = true;
+  const card = pop({ icon: '🚨', title: 'Escalating the report', steps: ['Sending to Telegram', 'Phoning the response contact', 'Finished'] });
+  try {
+    const r = await api(`/incidents/${i.id}/escalate`, { method: 'POST' });
+    const tg = r.telegram, ok = [], bad = [];
+    if (tg.status === 'SENT') { card.note(0, 'Sent to Telegram', 'ok'); ok.push('Telegram'); } else { card.note(0, tg.status === 'NOT_CONFIGURED' ? 'Telegram is not set up' : (tg.error || 'Telegram did not accept it'), 'bad'); bad.push('Telegram'); }
+    card.at(1);
+    if (r.call.status === 'INITIATED') { const f = await followCall(card, 1, r.call.call_id); (f.ok ? ok : bad).push('Phone call'); }
+    else { card.note(1, r.call.status === 'NOT_CONFIGURED' ? 'Phone calls are not set up' : (r.call.error || 'The call did not go through'), 'bad'); bad.push('Phone call'); }
+    if (!ok.length) card.fail('Nothing could be sent. See the notes above.'); else card.done(`${ok.join(' and ')} done${bad.length ? `; ${bad.join(' and ')} did not work` : ''}.`);
+    await loadIncidents(); showDetail(i.id);
+  } catch (e) { card.fail(e.status === 403 ? 'Your role is not allowed to do this. Use Reviewer, Officer or Admin.' : e.message); }
+}
+
 async function showDetail(id) {
   marking = false; document.body.classList.remove('mark-mode'); setHint('');
   selected = id; drawPins();
@@ -186,16 +215,22 @@ async function showDetail(id) {
   const ll = center(i.geometry); map.flyTo(ll, Math.max(map.getZoom(), 9), { duration: 0.6 });
   const near = fires.map((f) => ({ f, d: km(ll, [f[0], f[1]]) })).filter((x) => x.d <= 10).sort((a, b) => a.d - b.d);
   const site = i.evidence?.site;
-  $('#rightBody').innerHTML = html`<button class="back" id="back">‹ All incidents</button>
+  $('#rightBody').innerHTML = html`<button class="back" id="incBack">‹ All incidents</button>
     <div class="row-item" style="border:0;padding:0"><span style="font-size:26px">${em}</span><span class="grow"><h2 style="font-size:17px">${i.title}</h2><div class="sub">${kn} · ${ago(new Date(i.created_at).getTime())}</div></span></div>
     <div style="margin:8px 0"><span class="chip ${c}">${st}</span> <span class="sub">${ll[0].toFixed(4)}, ${ll[1].toFixed(4)}</span></div>
     
+    ${raw(incDecision(i))}
     <div class="sect"><h4>🔥 Fires nearby</h4>${raw(!fireMeta ? '<span class="sub">Fire data is not loaded.</span>' : near.length ? `<b>${near.length}</b> hotspot${near.length > 1 ? 's' : ''} within 10 km in the last ${fireDays * 24} h. Nearest: ${near[0].d.toFixed(1)} km${near[0].f[4] != null ? `, ${esc(near[0].f[4])} MW` : ''}.` : `None within 10 km in the last ${fireDays * 24} h.`)}</div>
     <div class="sect"><h4>🏭 Factory and emissions</h4><div id="siteBox">${raw(siteHtml(site))}</div>
       <div id="airBox" style="margin-top:10px"><span class="sub"><span class="spin"></span>Loading air quality…</span></div></div>
     <div class="sect"><h4>📄 Report</h4><div class="sub">PDF with the details above, the evidence, and the audit trail.</div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary grow" id="rep">Generate report</button></div><div class="sub" id="repOut"></div></div>
+    <details class="more"><summary>More</summary><div class="row2" style="margin-top:8px"><button class="btn sm danger" id="incDel">− Remove this incident</button></div></details>
     <p class="fine"><a href="/app#/investigations/${encodeURIComponent(i.id)}">Open the full case in the console →</a></p>`;
-  $('#back').onclick = () => { selected = null; drawPins(); paintList(); };
+  $('#incBack').onclick = () => { selected = null; drawPins(); paintList(); };
+  $('#incEsc')?.addEventListener('click', () => escalateIncident(i));
+  $('#incFalse')?.addEventListener('click', async () => { try { await api(`/incidents/${i.id}/false-alarm`, { method: 'POST' }); toast('Marked as a false alarm'); await loadIncidents(); showDetail(i.id); } catch (e) { toast(e.message, 'error'); } });
+  $('#incUndo')?.addEventListener('click', async () => { try { await api(`/incidents/${i.id}/reopen`, { method: 'POST' }); toast('Back in review'); await loadIncidents(); showDetail(i.id); } catch (e) { toast(e.message, 'error'); } });
+  $('#incDel').onclick = async (e) => { const b = e.target; if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to remove'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '− Remove this incident'; } }, 5000); return; } try { await api(`/incidents/${i.id}`, { method: 'DELETE' }); selected = null; toast('Incident removed'); await loadIncidents(); paintList(); } catch (err) { toast(err.status === 403 ? 'Only a Reviewer or Admin can remove an incident' : err.message, 'error'); } };
   $('#siteEdit')?.addEventListener('click', () => siteDialog(i)); $('#siteAdd')?.addEventListener('click', () => siteDialog(i));
   $('#siteDel')?.addEventListener('click', async () => { try { await api(`/incidents/${i.id}/site`, { method: 'DELETE' }); toast('Factory info removed'); await loadIncidents(); showDetail(i.id); } catch (e) { toast(e.message, 'error'); } });
   $('#rep').onclick = async () => {
@@ -242,6 +277,7 @@ map.on('click', () => { if (!marking && selected) { /* keep detail open; clickin
 
 paintList();
 loadIncidents().then(paintList);
+window.rkMap = map;   // handy for tests and debugging
 FIRE.init({ map });
 FOREST.init({ map });
 CASES.init({ map });

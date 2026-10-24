@@ -20,7 +20,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "FAILED": {"DISPATCH_REQUESTED", "CANCELLED"},
     "DISPATCHED": {"MONITORING", "RESOLVED", "CANCELLED"},
     "MONITORING": {"RESOLVED", "DISPATCH_REQUESTED", "CANCELLED"},
-    "RESOLVED": set(), "REJECTED": set(), "CANCELLED": set(),
+    "RESOLVED": set(), "REJECTED": {"NEEDS_VERIFICATION"}, "CANCELLED": {"NEEDS_VERIFICATION"},
 }
 TERMINAL = {"RESOLVED", "REJECTED", "CANCELLED"}
 LABEL = {"DETECTED": "Detected", "NEEDS_VERIFICATION": "Needs verification", "CONFIRMED": "Confirmed", "DISPATCH_REQUESTED": "Dispatch requested", "DISPATCHED": "Dispatched (acknowledged)", "MONITORING": "Monitoring", "RESOLVED": "Resolved", "REJECTED": "Rejected", "CANCELLED": "Cancelled", "FAILED": "Notification failed", "INCONCLUSIVE": "Inconclusive"}
@@ -130,6 +130,8 @@ def transition(incident_id: str, target: str, actor: str, note: str = "") -> dic
     patch: dict[str, Any] = {"status": target, "updated_at": now()}
     if target in TERMINAL:
         patch["closed_at"] = now()
+    elif inc["status"] in TERMINAL:
+        patch["closed_at"] = None   # reopened
     update("fire_incidents", "id", incident_id, patch)
     log_event(incident_id, "status_changed", "workflow", "ok", f"{inc['code']}: {LABEL.get(inc['status'])} → {LABEL.get(target)}", is_demo=inc["is_demo"], details={"from": inc["status"], "to": target, "actor_role": actor})
     audit(actor, "fire_incident_status", "fire_incident", incident_id, {"from": inc["status"], "to": target, "note": note})

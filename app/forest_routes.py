@@ -21,7 +21,7 @@ jobs = JobManager(settings.job_workers)
 READ = (Role.ADMIN, Role.REVIEWER, Role.OFFICER, Role.ANALYST, Role.READ_ONLY)
 SCAN = (Role.ADMIN, Role.REVIEWER, Role.ANALYST, Role.OFFICER)
 REVIEW = (Role.ADMIN, Role.REVIEWER, Role.OFFICER)
-SEND = (Role.ADMIN, Role.OFFICER)
+SEND = (Role.ADMIN, Role.REVIEWER, Role.OFFICER)
 
 
 class M(BaseModel):
@@ -167,6 +167,36 @@ def notify_record(rid: str, payload: NotifyIn, role: Role = Depends(require_role
     return _wf(fw.notify, rid, payload.channels, payload.mode, payload.confirm_real, role.value, payload.resend)
 
 
+class PermitIn(M):
+    authority: str = Field(min_length=2, max_length=160, description="who issued it")
+    permit_number: str = Field(min_length=1, max_length=120)
+    project_name: str | None = Field(default=None, max_length=200)
+    status: Literal["issued", "approved", "granted", "conditional_approval", "pending", "rejected", "revoked", "expired"] = "issued"
+    valid_from: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    valid_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    source_url: str | None = Field(default=None, max_length=500, pattern=r"^https?://")
+    note: str | None = Field(default=None, max_length=500)
+
+
+@api.post("/records/{rid}/permits")
+def add_permit(rid: str, payload: PermitIn, role: Role = Depends(require_roles(*REVIEW))):
+    _rec(rid)
+    return _wf(fw.add_permit, rid, payload.model_dump(), role.value)
+
+
+@api.delete("/records/{rid}/permits/{pid}")
+def remove_permit(rid: str, pid: str, role: Role = Depends(require_roles(*REVIEW))):
+    _rec(rid)
+    return _wf(fw.remove_permit, rid, pid, role.value)
+
+
+@api.delete("/records/{rid}")
+def delete_record(rid: str, role: Role = Depends(require_roles(Role.ADMIN, Role.REVIEWER))):
+    _rec(rid)
+    _wf(fw.delete_record, rid, role.value)
+    return {"deleted": rid}
+
+
 @api.get("/records/{rid}/call-script")
 def call_script(rid: str, role: Role = Depends(require_roles(*READ))):
     """The exact words a phone call would speak, so the operator can read or hear them first."""
@@ -194,13 +224,13 @@ def export(days: int = Query(90, ge=1, le=365), role: Role = Depends(require_rol
 @api.get("/cases")
 def case_list(role: Role = Depends(require_roles(*READ))):
     from app.services import casestudies
-    return casestudies.listing()
+    return casestudies.listing() if settings.enable_examples else []
 
 
 @api.get("/cases/{case_id}")
 def case_detail(case_id: str, role: Role = Depends(require_roles(*READ))):
     from app.services import casestudies
-    c = casestudies.build(case_id)
+    c = casestudies.build(case_id) if settings.enable_examples else None
     if not c:
         raise HTTPException(status_code=404, detail="Case not found")
     return c

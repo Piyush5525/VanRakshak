@@ -38,7 +38,13 @@ def test_live_map_marks_an_incident_adds_factory_info_and_downloads_a_report(ser
     with page.expect_download() as dl:
         page.click("#rep")
     assert dl.value.suggested_filename.endswith(".pdf")
-    page.click("#back")
+    # the same two decisions as everywhere else, and both can be undone
+    assert page.locator("#incEsc").count() == 1 and page.locator("#incFalse").count() == 1
+    page.click("#incFalse")
+    page.wait_for_function("document.querySelector('#rightBody').innerText.includes('Marked as a false alarm')")
+    page.click("#incUndo")
+    page.wait_for_selector("#incEsc")
+    page.click("#incBack")
     assert page.locator("#rightBody .row-item").count() == 1
     assert problems == []
     ctx.close()

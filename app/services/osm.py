@@ -6,6 +6,8 @@ village boundaries, so "none found" means "none mapped", never "none exist".
 import time
 from typing import Any
 
+import os
+
 import httpx
 from pyproj import Transformer
 from shapely.geometry import LineString, Point, Polygon
@@ -13,7 +15,7 @@ from shapely.ops import transform as shp_transform
 
 from app.core.geometry import to_shape
 
-OVERPASS_URLS = ("https://overpass.openstreetmap.fr/api/interpreter", "https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+OVERPASS_URLS = () if os.environ.get("OSM_DISABLED") == "true" else ("https://overpass.openstreetmap.fr/api/interpreter", "https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
 ATTRIBUTION = "Map data (c) OpenStreetMap contributors, ODbL 1.0"
 MAX_SPAN_DEG = 0.5  # reject very large query areas
 BUFFER_DEG = 0.03   # about 3 km search margin

@@ -9,6 +9,7 @@ Outputs (written into RASTER_DIR, co-registered on a shared UTM grid):
 """
 import hashlib
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -29,7 +30,8 @@ from app.core.geometry import to_shape
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 SAS_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{collection}"
 S2_CLOUD_CLASSES = (0, 1, 3, 8, 9, 10)  # nodata, saturated, cloud shadow, cloud med/high, thin cirrus
-GDAL_ENV = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff", "GDAL_HTTP_TIMEOUT": "45", "GDAL_HTTP_MAX_RETRY": "3", "GDAL_HTTP_RETRY_DELAY": "2", "VSI_CACHE": "TRUE"}
+_TOKEN_LOCK = threading.Lock()
+GDAL_ENV = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff", "GDAL_HTTP_TIMEOUT": "45", "GDAL_HTTP_MAX_RETRY": "3", "GDAL_HTTP_RETRY_DELAY": "2", "VSI_CACHE": "TRUE", "GDAL_INGESTED_BYTES_AT_OPEN": "65536", "GDAL_HTTP_MULTIPLEX": "YES", "GDAL_HTTP_VERSION": "2"}
 
 
 class ProviderError(RuntimeError):
@@ -108,6 +110,13 @@ class PlanetaryComputer:
         cached = self._tokens.get(collection)
         if cached and cached[1] > time.time() + 120:
             return cached[0]
+        with _TOKEN_LOCK:   # many reader threads start together: ask for ONE token, not one each (the service throttles bursts)
+            cached = self._tokens.get(collection)
+            if cached and cached[1] > time.time() + 120:
+                return cached[0]
+            return self._fetch_token(collection)
+
+    def _fetch_token(self, collection: str) -> str:
         data, last = None, None
         for attempt in range(5):
             try:
@@ -139,14 +148,32 @@ class PlanetaryComputer:
         return f"{href}?{self.token(collection)}"
 
     # ---------------------------------------------------------------- reading
+    @staticmethod
+    def _overview_for(asset: dict[str, Any], target_res: float) -> int | None:
+        """Cloud-optimised files carry pre-shrunk copies (2x, 4x, 8x...). Reading the coarsest copy that is still at least as fine as
+        the grid we want moves a fraction of the data, which is most of the time a scan spends."""
+        r0 = asset.get("gsd") or ((asset.get("raster:bands") or [{}])[0].get("spatial_resolution"))
+        if not r0 or target_res <= r0 * 1.99:
+            return None
+        f, level = 2, 0
+        while r0 * f * 2 <= target_res * 1.01 and level < 4:
+            f *= 2; level += 1
+        return level
+
     def _read_band(self, collection: str, asset: dict[str, Any], grid: Grid, resampling: Resampling, nodata_override: float | None = None) -> np.ma.MaskedArray:
         url = self.signed(collection, asset["href"])
+        level = self._overview_for(asset, grid.resolution)
         with rasterio.Env(**GDAL_ENV):
-            with rasterio.open(url) as src:
-                nodata = nodata_override if nodata_override is not None else src.nodata
-                with WarpedVRT(src, crs=grid.crs, transform=grid.transform, width=grid.width, height=grid.height, resampling=resampling, nodata=nodata, src_nodata=(src.nodata if src.nodata is not None else nodata_override), dtype="float32") as vrt:
-                    data = vrt.read(1, masked=True)
-        return data
+            for lvl in ((level, None) if level is not None else (None,)):
+                try:
+                    kw = {} if lvl is None else {"overview_level": lvl}
+                    with rasterio.open(url, **kw) as src:
+                        nodata = nodata_override if nodata_override is not None else src.nodata
+                        with WarpedVRT(src, crs=grid.crs, transform=grid.transform, width=grid.width, height=grid.height, resampling=resampling, nodata=nodata, src_nodata=(src.nodata if src.nodata is not None else nodata_override), dtype="float32") as vrt:
+                            return vrt.read(1, masked=True)
+                except rasterio.errors.RasterioIOError:
+                    if lvl is None:
+                        raise   # no such overview: fall back to the full-resolution file
 
     # ---------------------------------------------------------------- Sentinel-2
     def sentinel2_composite(self, geometry: dict[str, Any], centre: date, cfg: AcquisitionConfig, out_path: Path) -> Composite:

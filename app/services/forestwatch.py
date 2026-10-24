@@ -6,6 +6,7 @@ Everything here is a *candidate* from satellite evidence. Nothing states that an
 forest authority after field verification. Missing data is reported as missing, never filled in.
 """
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import math
 import re
@@ -161,7 +162,8 @@ def scan(run_id: str, bbox: list[float], start: date, end: date, use_radar: bool
         cfg = AcquisitionConfig(resolution_m=resolution_for(area_km2))
         _step(run_id, steps, f"Scanning {area_km2:.1f} km² at {cfg.resolution_m:.0f} m from {start} to {end} ({(end - start).days} days) with Sentinel-2 optical" + (" + Sentinel-1 radar" if use_radar else " (radar off)"), 0.02)
         ref_ym = add_months(start.year, start.month, -12)
-        n_months = (end.year - ref_ym[0]) * 12 + end.month - ref_ym[1] + 1
+        months = needed_months(start, end)
+        n_months = len(months)
         orbit = None
         if use_radar:
             try:
@@ -170,15 +172,26 @@ def scan(run_id: str, bbox: list[float], start: date, end: date, use_radar: bool
             except ProviderError as exc:
                 use_radar = False
                 _step(run_id, steps, f"Radar unavailable ({exc}); continuing with optical only", 0.05, "warning")
-        opt = series(geom, "sentinel-2", ref_ym, n_months, cfg, progress=lambda m: _step(run_id, steps, m))
-        _step(run_id, steps, f"Sentinel-2: {len(opt['when'])} usable date(s) in total", 0.55)
-        rad = None
-        if use_radar:
-            try:
-                rad = series(geom, "sentinel-1", ref_ym, n_months, cfg, orbit=orbit, progress=lambda m: _step(run_id, steps, m))
-                _step(run_id, steps, f"Sentinel-1: {len(rad['when'])} date(s) in total", 0.8)
-            except ProviderError as exc:
-                _step(run_id, steps, f"Radar series failed ({exc}); continuing with optical only", 0.8, "warning")
+        total = n_months * (2 if use_radar else 1)
+        counts = {"n": 0}
+
+        def tick(msg: str, done: int, of: int) -> None:
+            counts["n"] += 1
+            _step(run_id, steps, msg, round(0.06 + 0.8 * counts["n"] / total, 3))
+
+        with ThreadPoolExecutor(2) as pool:   # optical and radar are independent: read them together
+            f_opt = pool.submit(series, geom, "sentinel-2", ref_ym, n_months, cfg, None, tick, months)
+            f_rad = pool.submit(series, geom, "sentinel-1", ref_ym, n_months, cfg, orbit, tick, months) if use_radar else None
+            opt = f_opt.result()
+            rad = None
+            if f_rad is not None:
+                try:
+                    rad = f_rad.result()
+                except ProviderError as exc:
+                    _step(run_id, steps, f"Radar series failed ({exc}); continuing with optical only", None, "warning")
+        if not len(opt["when"]):
+            raise ProviderError("No Sentinel-2 image could be read for this area" + (f" ({opt['warnings'][0]})" if opt.get("warnings") else "") + ". Try again in a minute.")
+        _step(run_id, steps, f"Sentinel-2: {len(opt['when'])} usable date(s); Sentinel-1: {len(rad['when']) if rad else 0} date(s)", 0.88)
         ref_end = (start - alerts.EPOCH).days
         fused = alerts.detect(opt, rad, ref_end, ref_end, params, use_radar=rad is not None)
         grid = opt["grid"]
@@ -247,6 +260,20 @@ def _timeline(fused: dict[str, Any], patches: list[dict[str, Any]], grid, end: d
     return out
 
 
+def needed_months(start: date, end: date) -> list[tuple[int, int]]:
+    """Months worth reading. A pixel is compared with the same time of year (+/- 30 days) before the window, so only three stretches
+    matter: the same season last year, the weeks just before the window, and the window itself. The months in between are skipped."""
+    spans = [(start - timedelta(days=365 + 31), end - timedelta(days=365 - 31)), (start - timedelta(days=31), end)]
+    out: list[tuple[int, int]] = []
+    for a, b in spans:
+        d = date(a.year, a.month, 1)
+        while d <= b:
+            if (d.year, d.month) not in out:
+                out.append((d.year, d.month))
+            d = date(d.year + (d.month == 12), d.month % 12 + 1, 1)
+    return sorted(out)
+
+
 def severity(area_ha: float) -> str:
     return "HIGH" if area_ha >= 5 else "MEDIUM" if area_ha >= 1 else "LOW"
 
@@ -308,19 +335,57 @@ def verify(record_id: str, actor: str = "system") -> dict[str, Any]:
             continue
         cls = _MAP.get(r["state"])
         if cls:
-            considered.append({"record": a.get("project_identifier") or a["id"][:8], "authority": a.get("authority"), "state": r["state"], "overlap": r["overlap_fraction"]})
+            d = a.get("dates") or {}
+            considered.append({"id": a["id"], "project": a.get("project_name"), "number": a.get("project_identifier"), "authority": a.get("authority"), "status": a.get("status"), "valid_from": d.get("valid_from") or d.get("issued"), "valid_to": d.get("valid_to"), "source_url": a.get("source_url"), "entered_by": (a.get("evidence") or {}).get("entered_by_role"), "state": r["state"], "class": cls, "overlap": r["overlap_fraction"], "temporal": r["temporal"]})
             rank = _ORDER.index(cls)
             if rank < best_rank:
                 best, best_rank = cls, rank
     weak = (rec["date_uncertainty_days"] or 0) > 45 or rec["area_ha"] < 0.3
     cls = best or ("INSUFFICIENT_EVIDENCE" if weak else "NO_RECORD_FOUND")
-    out = {"class": cls, "meaning": VERIFICATION[cls][0], "next_step": VERIFICATION[cls][1], "records_in_system": len(with_geom), "overlapping_records": considered[:5], "checked_at": now(), "notice": "A candidate from satellite evidence compared with the records loaded in this system. Not a legal finding."}
+    out = {"class": cls, "meaning": VERIFICATION[cls][0], "next_step": VERIFICATION[cls][1], "records_in_system": len(with_geom), "permits": considered[:6], "overlapping_records": considered[:6], "checked_at": now(), "notice": "A candidate from satellite evidence compared with the records loaded in this system. Not a legal finding."}
     update("fc_records", "id", record_id, {"verification": out, "updated_at": now()})
     log("record_verified", "verification", "ok", f"Permit check: {VERIFICATION[cls][0]}", record_id=record_id, actor=actor, details={"overlapping": len(considered)})
     return out
 
 
 # ------------------------------------------------------------------ queries
+def add_permit(record_id: str, data: dict[str, Any], actor: str) -> dict[str, Any]:
+    """A permit someone knows applies to this spot, stored with who entered it and where it came from. Its outline is taken to be
+    this spot's outline (plus a small margin), because the issuing authority's boundary is not available here; the card says so."""
+    rec = _get(record_id)
+    if not rec:
+        raise WatchError("Record not found")
+    outline = mapping(to_shape(rec["geometry"]).buffer(0.0003))
+    pid = str(uuid.uuid4())
+    insert("authorizations", {"id": pid, "authority": data["authority"], "project_identifier": data.get("permit_number"), "project_name": data.get("project_name"), "status": data["status"], "geometry": outline,
+                              "dates": {k: v for k, v in (("valid_from", data.get("valid_from")), ("valid_to", data.get("valid_to"))) if v}, "source_url": data.get("source_url"),
+                              "evidence": {"entered_by_role": actor, "coverage": "Outline assumed to cover this spot, as entered by a person; the authority's own boundary was not available.", "note": data.get("note")}, "created_at": now()})
+    audit(actor, "permit_added", "authorization", pid, {"record": rec["code"], "number": data.get("permit_number")})
+    log("permit_added", "verification", "ok", f"Permit {data.get('permit_number') or data.get('project_name') or ''} added by {actor}".strip(), record_id=record_id, actor=actor)
+    return verify(record_id, actor)
+
+
+def remove_permit(record_id: str, permit_id: str, actor: str) -> dict[str, Any]:
+    p = get_one("authorizations", "id", permit_id)
+    if not p or not (p.get("evidence") or {}).get("entered_by_role"):
+        raise WatchError("Only a permit that was entered by hand can be removed here")
+    with connection() as conn:
+        conn.execute("DELETE FROM authorizations WHERE id = ?", (permit_id,))
+    audit(actor, "permit_removed", "authorization", permit_id, {})
+    log("permit_removed", "verification", "ok", "A permit entered by hand was removed", record_id=record_id, actor=actor)
+    return verify(record_id, actor)
+
+
+def delete_record(record_id: str, actor: str) -> None:
+    rec = _get(record_id)
+    if not rec:
+        raise WatchError("Record not found")
+    with connection() as conn:
+        conn.execute("DELETE FROM fc_events WHERE record_id = ?", (record_id,))
+        conn.execute("DELETE FROM fc_records WHERE id = ?", (record_id,))
+    audit(actor, "forest_record_deleted", "fc_record", record_id, {"code": rec["code"]})
+
+
 def public(r: dict[str, Any], full: bool = False) -> dict[str, Any]:
     est = date.fromisoformat(r["est_date"])
     age = (datetime.now(timezone.utc).date() - est).days
@@ -485,11 +550,12 @@ def assign_authority(record_id: str, router, actor: str, station_id: str | None 
     if geom and len(geom["coordinates"]) > 400:
         step = len(geom["coordinates"]) / 400
         geom = {"type": "LineString", "coordinates": [geom["coordinates"][int(i * step)] for i in range(400)] + [geom["coordinates"][-1]]}
-    route = {"status": "OK", "provider": best["provider"], "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": r["adjusted_duration_min"], "geometry": geom, "reasons": r["reasons"], "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={olat},{olon}&destination={lat},{lon}&travelmode=driving", "calculated_at": now(), "caveats": ["Road-network estimate, not live traffic.", "Forest tracks near the site may be missing from road data; the final approach may be on foot.", "The office is unverified public mapping data: its jurisdiction and availability are not confirmed."]}
+    from app.services.firestations import _segments_small, _walk_url
+    route = {"status": "OK", "provider": best["provider"], "distance_km": r["distance_km"], "duration_min": r["duration_min"], "adjusted_duration_min": r["adjusted_duration_min"], "geometry": geom, "segments": _segments_small(r.get("segments")), "drive_km": r.get("drive_km"), "walk_km": r.get("walk_km"), "drive_min": r.get("drive_min"), "walk_min": r.get("walk_min"), "walk_url": _walk_url(r.get("segments"), lat, lon), "reasons": r["reasons"], "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={olat},{olon}&destination={lat},{lon}&travelmode=driving", "calculated_at": now(), "caveats": ["Road-network estimate, not live traffic.", "Forest tracks near the site may be missing from road data; the final approach may be on foot.", "The office is unverified public mapping data: its jurisdiction and availability are not confirmed."]}
     auth = {"status": "OK", "office": _office(st, best["d"]), "selected": "nearest by estimated road time among the 3 closest offices", "assigned_at": now(), "assigned_by": actor}
     update("fc_records", "id", record_id, {"authority": auth, "route": route, "updated_at": now()})
     audit(actor, "forest_authority_assigned", "fc_record", record_id, {"office": st["name"]})
-    log("route_calculated", "routing", "ok", f"Route ready: {route['distance_km']} km, about {round(route['duration_min'])} min by road", record_id=record_id, actor=actor)
+    log("route_calculated", "routing", "ok", f"Route ready: {route['distance_km']} km, about {round(route['duration_min'])} min{' (' + str(route['walk_km']) + ' km of it on foot)' if route.get('walk_km') else ''}", record_id=record_id, actor=actor)
     log("authority_assigned", "authority", "ok", f"Assigned to {st['name']} (office details unverified)", record_id=record_id, actor=actor)
     return {**auth, "route": route}
 
@@ -605,7 +671,7 @@ def spoken(rec: dict[str, Any]) -> str:
         parts.append("A permit exists nearby, but it may not cover this clearing.")
     if a.get("office") and r.get("status") == "OK":
         o = a["office"]
-        parts.append(f"The responsible office is {o['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, about {geoinfo.say_minutes(r['duration_min'])} by road.")
+        parts.append(f"The responsible office is {o['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, {geoinfo.say_journey(r)}.")
     parts.append(f"The location is {abs(lat):.3f} degrees {'north' if lat >= 0 else 'south'}, {abs(lon):.3f} degrees {'east' if lon >= 0 else 'west'}. The record code is {rec['code'].replace('-', ' ')}.")
     parts.append("This comes from satellite images and must be checked on the ground. The map and route are in the VanRakshak app. Please verify and respond.")
     return " ".join(parts)

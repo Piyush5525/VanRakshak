@@ -6,6 +6,7 @@ tiles are merged. Arrays are float32 with NaN where there is no valid observatio
 import calendar
 import hashlib
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -19,7 +20,9 @@ from app.core.geometry import to_shape
 from app.services.acquisition import provider
 from app.services.satellite import S2_CLOUD_CLASSES, AcquisitionConfig, Grid, ProviderError, make_grid
 
-WORKERS = 4
+WORKERS = 4          # scenes read at once within a month
+MONTH_WORKERS = 4    # months read at once
+SEARCH_CHUNK = 4     # months per catalogue search (one request instead of one per month)
 
 
 def month_bounds(y: int, m: int) -> tuple[date, date]:
@@ -59,12 +62,14 @@ def _read_s2(pc, item: dict, grid: Grid) -> dict[str, Any]:
         d = pc._read_band("sentinel-2-l2a", asset, grid, Resampling.bilinear)
         return np.ma.masked_less_equal(d, 0) * meta.get("scale", 1e-4) + meta.get("offset", 0.0)
 
-    nir, swir = scaled("B08"), scaled("B12")
-    scl = pc._read_band("sentinel-2-l2a", item["assets"]["SCL"], grid, Resampling.nearest)
+    with ThreadPoolExecutor(3) as pool:   # the three bands are separate files: read them at the same time
+        f_nir, f_swir = pool.submit(scaled, "B08"), pool.submit(scaled, "B12")
+        f_scl = pool.submit(pc._read_band, "sentinel-2-l2a", item["assets"]["SCL"], grid, Resampling.nearest)
+        nir, swir, scl = f_nir.result(), f_swir.result(), f_scl.result()
     bad = np.isin(scl.filled(0), S2_CLOUD_CLASSES) | np.ma.getmaskarray(nir) | np.ma.getmaskarray(swir)
-    n, s = nir.filled(np.nan), swir.filled(np.nan)
+    n, s_ = nir.filled(np.nan), swir.filled(np.nan)
     with np.errstate(all="ignore"):
-        nbr = np.where((n + s) > 0, (n - s) / (n + s), np.nan)
+        nbr = np.where((n + s_) > 0, (n - s_) / (n + s_), np.nan)
     nbr[bad] = np.nan
     return {"id": item["id"], "when": datetime.fromisoformat(item["properties"]["datetime"].replace("Z", "+00:00")), "data": nbr.astype("float32")}
 
@@ -96,7 +101,22 @@ def s1_orbit(geometry: dict, start: date, end: date) -> dict[str, Any]:
     return {"orbit_state": best[0], "relative_orbit": best[1], "scenes_in_period": keys.count(best)}
 
 
-def month_stack(geometry: dict, sensor: str, y: int, m: int, cfg: AcquisitionConfig, orbit: dict | None = None, max_cloud: float = 85.0) -> dict[str, Any]:
+def _single_cover(items: list[dict[str, Any]], bbox: list[float]) -> list[dict[str, Any]]:
+    """Neighbouring tiles overlap, so a small area is often covered by several scenes on the same day. Keep one per day when a
+    single scene covers the whole area (the clearest one); reading the others would only repeat the same pixels."""
+    from shapely.geometry import box as _box, shape as _shape
+    target = _box(*bbox)
+    by_day: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        by_day.setdefault(it["properties"]["datetime"][:10], []).append(it)
+    keep: list[dict[str, Any]] = []
+    for group in by_day.values():
+        full = [g for g in group if g.get("geometry") and _shape(g["geometry"]).buffer(1e-4).contains(target)]
+        keep += [min(full, key=lambda g: g["properties"].get("eo:cloud_cover", 0))] if full else group
+    return keep
+
+
+def month_stack(geometry: dict, sensor: str, y: int, m: int, cfg: AcquisitionConfig, orbit: dict | None = None, max_cloud: float = 85.0, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """All usable acquisitions in calendar month (y, m). Cached once complete."""
     grid = make_grid(geometry, cfg)
     key = _key(geometry, sensor, y, m, json.dumps(orbit, sort_keys=True) if orbit else "")
@@ -108,11 +128,12 @@ def month_stack(geometry: dict, sensor: str, y: int, m: int, cfg: AcquisitionCon
     start, end = month_bounds(y, m)
     bbox = list(to_shape(geometry).bounds)
     if sensor == "sentinel-2":
-        items = pc.search("sentinel-2-l2a", bbox, start, end, {"eo:cloud_cover": {"lt": max_cloud}}, limit=100)
+        items = items if items is not None else pc.search("sentinel-2-l2a", bbox, start, end, {"eo:cloud_cover": {"lt": max_cloud}}, limit=100)
+        items = _single_cover(items, bbox)
         reader = _read_s2
     else:
         q = {"sar:instrument_mode": {"eq": "IW"}}
-        items = [i for i in pc.search("sentinel-1-rtc", bbox, start, end, q, limit=100) if "vh" in i["assets"]]
+        items = [i for i in (items if items is not None else pc.search("sentinel-1-rtc", bbox, start, end, q, limit=100)) if "vh" in i["assets"]]
         if orbit:
             items = [i for i in items if i["properties"].get("sat:orbit_state") == orbit["orbit_state"] and i["properties"].get("sat:relative_orbit") == orbit["relative_orbit"]]
         reader = _read_s1
@@ -140,16 +161,59 @@ def month_stack(geometry: dict, sensor: str, y: int, m: int, cfg: AcquisitionCon
     return {"data": arr, "when": whens, "ids": ids, "grid": grid, "cache_hit": False, "warnings": warnings}
 
 
-def series(geometry: dict, sensor: str, start_ym: tuple[int, int], n_months: int, cfg: AcquisitionConfig, orbit: dict | None = None, progress=None) -> dict[str, Any]:
-    arrays, whens, ids, grid = [], [], [], None
-    for k in range(n_months):
-        y, m = add_months(*start_ym, k)
-        r = month_stack(geometry, sensor, y, m, cfg, orbit)
+def _cached(geometry: dict, sensor: str, y: int, m: int, orbit: dict | None) -> bool:
+    return _cache(sensor, _key(geometry, sensor, y, m, json.dumps(orbit, sort_keys=True) if orbit else "")).is_file()
+
+
+def _bulk_items(geometry: dict, sensor: str, months: list[tuple[int, int]], orbit: dict | None, max_cloud: float = 70.0) -> dict[tuple[int, int], list[dict[str, Any]]]:
+    """One catalogue search per few months instead of one per month; the results are sorted back into their months."""
+    pc = provider()
+    bbox = list(to_shape(geometry).bounds)
+    chunks = [months[i:i + SEARCH_CHUNK] for i in range(0, len(months), SEARCH_CHUNK)]
+
+    def one(chunk):
+        start, end = month_bounds(*chunk[0])[0], month_bounds(*chunk[-1])[1]
+        if sensor == "sentinel-2":
+            return pc.search("sentinel-2-l2a", bbox, start, end, {"eo:cloud_cover": {"lt": max_cloud}}, limit=400)
+        return pc.search("sentinel-1-rtc", bbox, start, end, {"sar:instrument_mode": {"eq": "IW"}}, limit=400)
+
+    out: dict[tuple[int, int], list[dict[str, Any]]] = {mm: [] for mm in months}
+    with ThreadPoolExecutor(min(len(chunks), 4)) as pool:
+        for found in pool.map(one, chunks):
+            for it in found:
+                d = it["properties"]["datetime"]
+                key = (int(d[:4]), int(d[5:7]))
+                if key in out:
+                    out[key].append(it)
+    return out
+
+
+def series(geometry: dict, sensor: str, start_ym: tuple[int, int], n_months: int, cfg: AcquisitionConfig, orbit: dict | None = None, progress=None, months: list[tuple[int, int]] | None = None) -> dict[str, Any]:
+    """All months, read in parallel. Months already cached are free; the rest share bulk catalogue searches."""
+    months = months or [add_months(*start_ym, k) for k in range(n_months)]
+    todo = [mm for mm in months if not _cached(geometry, sensor, mm[0], mm[1], orbit)]
+    if todo:
+        provider().token("sentinel-2-l2a" if sensor == "sentinel-2" else "sentinel-1-rtc")   # fetch the access token once, before the readers start together
+    found = _bulk_items(geometry, sensor, todo, orbit) if todo else {}
+    lock = threading.Lock()
+    done = {"n": 0}
+
+    def one(mm):
+        r = month_stack(geometry, sensor, mm[0], mm[1], cfg, orbit, items=found.get(mm))
+        with lock:
+            done["n"] += 1
+            if progress:
+                progress(f"{sensor} {mm[0]}-{mm[1]:02d}: {len(r['when'])} acquisition date(s){' (cached)' if r['cache_hit'] else ''}", done["n"], len(months))
+        return r
+
+    with ThreadPoolExecutor(MONTH_WORKERS) as pool:
+        results = list(pool.map(one, months))
+    arrays, whens, ids, grid, warns = [], [], [], None, []
+    for r in results:
         grid = r["grid"]
+        warns += r.get("warnings") or []
         if len(r["when"]):
             arrays.append(r["data"]); whens += r["when"]; ids += r["ids"]
-        if progress:
-            progress(f"{sensor} {y}-{m:02d}: {len(r['when'])} acquisition date(s){' (cached)' if r['cache_hit'] else ''}")
     data = np.concatenate(arrays) if arrays else np.zeros((0, grid.height, grid.width), dtype="float32")
     order = np.argsort([w.timestamp() for w in whens]) if whens else []
-    return {"data": data[order] if len(order) else data, "when": [whens[i] for i in order], "ids": [ids[i] for i in order], "grid": grid}
+    return {"data": data[order] if len(order) else data, "when": [whens[i] for i in order], "ids": [ids[i] for i in order], "grid": grid, "warnings": warns}

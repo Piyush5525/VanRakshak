@@ -26,7 +26,7 @@ api = APIRouter(prefix=settings.api_prefix + "/fire")
 jobs = JobManager(settings.job_workers)
 READ = (Role.ADMIN, Role.REVIEWER, Role.OFFICER, Role.ANALYST, Role.READ_ONLY)
 CREATE = (Role.ADMIN, Role.REVIEWER, Role.OFFICER)
-DISPATCH = (Role.ADMIN, Role.OFFICER)
+DISPATCH = (Role.ADMIN, Role.REVIEWER, Role.OFFICER)
 DEMO_KEY = "fire_demo_config"
 DEMO_DEFAULT = {"lat": 21.95, "lon": 78.05, "frp_mw": 38.0, "use_live_weather": False, "weather": {"wind_kmh": 24.0, "wind_from_deg": 270.0, "temp_c": 36.0, "rh": 22.0, "rain_24h_mm": 0.0, "rain_7d_mm": 0.0}, "note": "Illustrative dry, windy conditions in a forested area of central India. Everything about this incident is synthetic."}
 _demo = {"running": False, "stop": False}
@@ -72,7 +72,7 @@ def fire_status(probe: bool = False, role: Role = Depends(require_roles(*READ)))
     feed = fireops.events(services=["nasa_firms"], limit=1)
     cfg = firecomms.configured()
     tg = firecomms.status() if probe else {**cfg, "chat_masked": ("…" + str(settings.telegram_chat_id)[-3:]) if settings.telegram_chat_id else None, "ready_to_send": cfg["token"] and cfg["chat_id"], "inbound_buttons_enabled": settings.telegram_polling, "probed": False}
-    return {"firms": {"configured": bool(settings.firms_api_key), "last_feed_event": feed[-1] if feed else None}, "telegram": tg, "ivr": fireivr.status(), "routing": router_service.status(),
+    return {"examples_enabled": settings.enable_examples, "firms": {"configured": bool(settings.firms_api_key), "last_feed_event": feed[-1] if feed else None}, "telegram": tg, "ivr": fireivr.status(), "routing": router_service.status(),
             "demo": {"running": _demo["running"]}, "stations_registered": _count_stations(),
             "forecast_model": {"name": "McArthur Mk5 + Anderson ellipse + Monte-Carlo", "status": "prototype, not validated", "horizons_h": [3, 6, 12]}}
 
@@ -127,8 +127,8 @@ def create_incident(payload: HotspotIn, role: Role = Depends(require_roles(*CREA
 
 
 @api.get("/incidents")
-def list_incidents(include_demo: bool = True, role: Role = Depends(require_roles(*READ))):
-    return [public_incident(i) for i in fireops.list_incidents(include_demo)]
+def list_incidents(include_demo: bool | None = None, role: Role = Depends(require_roles(*READ))):
+    return [public_incident(i) for i in fireops.list_incidents(settings.enable_examples if include_demo is None else (include_demo and settings.enable_examples))]
 
 
 @api.get("/incidents/{iid}")
@@ -425,6 +425,8 @@ def _demo_simulation(iid: str) -> None:
 
 @api.post("/demo/run")
 def demo_run(new: bool = False, role: Role = Depends(require_roles(*CREATE))):
+    if not settings.enable_examples:
+        raise HTTPException(status_code=403, detail="Example incidents are switched off (ENABLE_EXAMPLES)")
     cfg = _demo_config()
     existing = [i for i in fireops.list_incidents(True) if i["is_demo"] and i["status"] not in fireops.TERMINAL]
     if existing and not new:
@@ -462,6 +464,8 @@ def _scenario_batch(ids: list[str], role: str) -> dict[str, Any]:
 @api.post("/scenarios/load")
 def load_scenarios(role: Role = Depends(require_roles(*CREATE))):
     """Create the example fire incidents (idempotent). Each is prepared in the background: forecast, nearest station, route, impact."""
+    if not settings.enable_examples:
+        raise HTTPException(status_code=403, detail="Example incidents are switched off (ENABLE_EXAMPLES)")
     made, ids = [], []
     for s_ in SCENARIOS:
         det = {"source": "Scenario", "product": "scenario", "product_name": s_["name"], "satellite": "VIIRS", "confidence": None, "frp_mw": s_["frp"], "observed_at": now(), "currency": "demo", "synthetic": True, "place": {"name": s_["name"]},

@@ -54,6 +54,18 @@ settings = get_settings()
 settings.validate_runtime()
 configure_logging(settings.log_level)
 init_db()
+# Work that was running when the server last stopped cannot continue (jobs live in memory): say so instead of showing it as running forever.
+try:
+    from app.db.database import connection as _conn
+
+    with _conn() as _c:
+        _msg = '{"steps": [], "error": "Interrupted by a server restart. Please run it again."}'
+        for _t in ("fc_runs", "alert_runs"):
+            _c.execute(f"UPDATE {_t} SET status = 'FAILED', result = ? WHERE status IN ('QUEUED', 'RUNNING')", (_msg,))
+        _c.execute("UPDATE jobs SET status = 'failed', error = ? WHERE status IN ('queued', 'running')", ('{"type": "Interrupted", "message": "Interrupted by a server restart"}',))
+        _c.execute("UPDATE factory_checks SET status = 'FAILED', result = ? WHERE status = 'RUNNING'", ('{"status": "failed", "reason": "Interrupted by a server restart. Please run it again."}',))
+except Exception:  # noqa: BLE001 - never block startup
+    pass
 try:
     from app.services import firecomms as _fc
 

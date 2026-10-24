@@ -8,6 +8,7 @@ os.environ["REPORT_OUTPUT_DIR"] = f"{_tmp}/reports"
 os.environ["RASTER_DIR"] = f"{_tmp}/rasters"
 os.environ["MODEL_DIR"] = f"{_tmp}/models"
 os.environ["ENVIRONMENT"] = "test"
+os.environ["ENABLE_EXAMPLES"] = "true"   # examples are synthetic: only tests may use them
 os.environ["AUTH_MODE"] = "dev_header"
 os.environ["RATE_LIMIT_PER_MINUTE"] = "0"
 os.environ["ALLOW_REAL_NOTIFICATIONS"] = "false"

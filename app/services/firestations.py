@@ -137,7 +137,7 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
             evaluated.append(entry)
             continue
         best = ev["routes"][ev["recommended_index"]]
-        entry.update(provider=rt["provider"], distance_km=best["distance_km"], duration_min=best["duration_min"], adjusted_duration_min=best["adjusted_duration_min"], geometry=best.get("geometry"), steps=(best.get("steps") or [])[:25], reasons=best["reasons"], recommendation=best["recommendation"], alternatives=[{"distance_km": r["distance_km"], "duration_min": r["duration_min"], "status": r["status"], "geometry": _poly_small(r.get("geometry"))} for r in ev["routes"] if r["index"] != ev["recommended_index"]], fallback_note=rt.get("fallback_note"))
+        entry.update(provider=rt["provider"], distance_km=best["distance_km"], duration_min=best["duration_min"], adjusted_duration_min=best["adjusted_duration_min"], geometry=best.get("geometry"), segments=best.get("segments"), drive_km=best.get("drive_km"), walk_km=best.get("walk_km"), drive_min=best.get("drive_min"), walk_min=best.get("walk_min"), steps=(best.get("steps") or [])[:25], reasons=best["reasons"], recommendation=best["recommendation"], alternatives=[{"distance_km": r["distance_km"], "duration_min": r["duration_min"], "status": r["status"], "geometry": _poly_small(r.get("geometry"))} for r in ev["routes"] if r["index"] != ev["recommended_index"]], fallback_note=rt.get("fallback_note"))
         evaluated.append(entry)
     usable = [e for e in evaluated if e.get("distance_km") is not None]
     if not usable:
@@ -154,9 +154,9 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
     best_geom = _poly_small(best["geometry"], 600)
     res = {"status": "OK", "objective": "minimum estimated driving time (road network)", "selected_manually": bool(station_id),
            "station": public(st, best["straight_line_km"]), "provider": best["provider"], "distance_km": best["distance_km"], "duration_min": best["duration_min"], "adjusted_duration_min": best["adjusted_duration_min"],
-           "geometry": best_geom, "steps": best["steps"], "reasons": best["reasons"], "alternatives": best["alternatives"], "candidates": _merge_candidates([{k: v for k, v in e.items() if k not in ("geometry", "steps", "alternatives", "reasons")} for e in evaluated], (inc.get("route") or {}).get("candidates") if station_id else None),
+           "geometry": best_geom, "segments": _segments_small(best.get("segments")), "drive_km": best.get("drive_km"), "walk_km": best.get("walk_km"), "drive_min": best.get("drive_min"), "walk_min": best.get("walk_min"), "steps": best["steps"], "reasons": best["reasons"], "alternatives": best["alternatives"], "candidates": _merge_candidates([{k: v for k, v in e.items() if k not in ("geometry", "steps", "alternatives", "reasons", "segments")} for e in evaluated], (inc.get("route") or {}).get("candidates") if station_id else None),
            "calculated_at": t0.isoformat(), "duration_s": round((datetime.now(timezone.utc) - t0).total_seconds(), 1),
-           "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={st['location']['coordinates'][1]},{st['location']['coordinates'][0]}&destination={lat},{lon}&travelmode=driving",
+           "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={st['location']['coordinates'][1]},{st['location']['coordinates'][0]}&destination={lat},{lon}&travelmode=driving", "walk_url": _walk_url(best.get("segments"), lat, lon),
            "caveats": ["Road-network estimate only; typical driving time, not live traffic.", "Road closures, vehicle restrictions, terrain access, flooding and station availability are NOT verified.", "Forest tracks near the fire may be missing from road data; the final approach may be off-network.", "The station is unverified public mapping data. No dispatch has occurred."]}
     fireops.patch(incident_id, station=res["station"], route=res)
     fireops.log_event(incident_id, "route_calculated", "routing", "ok", f"Route calculated: {st['name']} -> incident, {res['distance_km']} km, ~{round(res['duration_min'])} min by road ({res['provider']})", ref=best["station_id"], is_demo=demo, details={"selected_manually": bool(station_id)})
@@ -174,6 +174,18 @@ def _merge_candidates(fresh: list[dict[str, Any]], previous: list[dict[str, Any]
         c["selected"] = any(f["station_id"] == c["station_id"] and f.get("selected") for f in fresh)
     order = [c["station_id"] for c in previous] + [c["station_id"] for c in fresh if c["station_id"] not in {x["station_id"] for x in previous}]
     return [by_id[i] for i in order]
+
+
+def _segments_small(segs: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [{**{k: v for k, v in s.items() if k != "geometry"}, "geometry": _poly_small(s.get("geometry"), 500)} for s in (segs or [])]
+
+
+def _walk_url(segs: list[dict[str, Any]] | None, lat: float, lon: float) -> str | None:
+    walk = next((s for s in (segs or []) if s["mode"] == "walk" and s.get("geometry")), None)
+    if not walk:
+        return None
+    a = walk["geometry"]["coordinates"][0]
+    return f"https://www.google.com/maps/dir/?api=1&origin={a[1]},{a[0]}&destination={lat},{lon}&travelmode=walking"
 
 
 def _poly_small(geom: dict | None, max_pts: int = 200) -> dict | None:

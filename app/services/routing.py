@@ -10,6 +10,9 @@ import httpx
 
 from app.core.config import Settings
 
+WALK_KMH = 4.0            # ordinary walking pace on a path
+ROUGH_KMH = 2.5           # pace used when no mapped path exists and the leg is straight across country
+WALK_LEG_MIN_M = 60       # a final approach shorter than this is not worth drawing as a separate leg
 CAVEAT = "Road-network estimate only; closures, seasonal access, permits and safety are not verified."
 
 
@@ -40,8 +43,10 @@ class Router:
 
     @property
     def providers(self) -> list[str]:
-        wanted = [p.strip() for p in self.settings.routing_provider.split(",") if p.strip()]
+        wanted = [p.strip() for p in self.settings.routing_provider.split(",") if p.strip() and p.strip() != "unconfigured"]
         ready = {"mapbox": bool(self.settings.mapbox_api), "serpapi": bool(self.settings.serp_api), "osrm": bool(self.settings.osrm_url)}
+        if not wanted:   # nothing named (or the placeholder "unconfigured"): use whatever has a key, best first
+            wanted = ["mapbox", "osrm", "serpapi"]
         return [p for p in wanted if ready.get(p)]
 
     @property
@@ -82,6 +87,60 @@ class Router:
         routes = [{"distance_km": round(x["distance"] / 1000, 2), "duration_min": round(x["duration"] / 60, 1), "via": x.get("via"), "geometry": None} for x in driving]
         return {"status": "ok", "primary": routes[0], "alternatives": routes[1:], "provider": "serpapi (Google Maps)", "note": "No route geometry from this provider; distance/duration only."}
 
+    # ------------------------------------------------------------ the last stretch on foot
+    def _walk_mapbox(self, o: list[float], d: list[float]) -> dict[str, Any] | None:
+        """A walking route (paths and tracks, not only roads). None if the provider has nothing usable."""
+        if not self.settings.mapbox_api:
+            return None
+        try:
+            r = self.client.get(f"https://api.mapbox.com/directions/v5/mapbox/walking/{o[0]},{o[1]};{d[0]},{d[1]}", params={"geometries": "geojson", "overview": "full", "steps": "true", "access_token": self.settings.mapbox_api})
+            data = r.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        if data.get("code") != "Ok" or not data.get("routes"):
+            return None
+        x = data["routes"][0]
+        steps = [{"instruction": st["maneuver"].get("instruction"), "distance_m": round(st["distance"]), "location": st["maneuver"]["location"]} for leg in x.get("legs", []) for st in leg.get("steps", [])]
+        return {"mode": "walk", "distance_km": round(x["distance"] / 1000, 2), "duration_min": round(x["duration"] / 60, 1), "geometry": x["geometry"], "steps": steps, "source": "mapped walking path", "estimated": False}
+
+    def _walk_leg(self, start: list[float], dest: list[float]) -> dict[str, Any]:
+        """The part of the journey the vehicle cannot do. Uses a mapped footpath when there is one; otherwise a straight line across
+        country, clearly marked as an estimate (slower pace, 30% longer than the straight distance)."""
+        straight = haversine_km(start, dest)
+        mapped = self._walk_mapbox(start, dest)
+        # a mapped walk is only believable if it actually reaches the place and is not shorter than the straight line
+        if mapped and straight * 0.9 <= mapped["distance_km"] <= max(straight * 3.0, 0.3) and haversine_km(mapped["geometry"]["coordinates"][-1], dest) * 1000 <= 80:
+            return mapped
+        km = round(straight * 1.3, 2)
+        return {"mode": "walk", "distance_km": km, "duration_min": round(km / ROUGH_KMH * 60, 1), "geometry": {"type": "LineString", "coordinates": [start, dest]}, "steps": [], "source": "straight line across country (no mapped path)", "estimated": True}
+
+    def _add_last_mile(self, out: dict[str, Any], destination: list[float]) -> None:
+        """Split every road route into 'drive to the nearest road' + 'walk the rest', so the screen can show both."""
+        for route in [out["primary"], *out.get("alternatives", [])]:
+            geom = route.get("geometry")
+            drive = {"mode": "drive", "distance_km": route["distance_km"], "duration_min": route["duration_min"], "geometry": geom, "source": out.get("provider")}
+            segs = [drive]
+            if geom and haversine_km(geom["coordinates"][-1], destination) * 1000 > WALK_LEG_MIN_M:
+                leg = self._walk_leg(geom["coordinates"][-1], destination)
+                if leg["distance_km"] * 1000 >= WALK_LEG_MIN_M:
+                    segs.append(leg)
+            route["segments"] = segs
+            route["drive_km"], route["walk_km"] = drive["distance_km"], round(sum(s["distance_km"] for s in segs[1:]), 2)
+            route["drive_min"], route["walk_min"] = drive["duration_min"], round(sum(s["duration_min"] for s in segs[1:]), 1)
+            if len(segs) > 1:
+                route["distance_km"] = round(drive["distance_km"] + route["walk_km"], 2)
+                route["duration_min"] = round(drive["duration_min"] + route["walk_min"], 1)
+                route["geometry"] = {"type": "LineString", "coordinates": geom["coordinates"] + segs[1]["geometry"]["coordinates"][1:]}
+                route["steps"] = (route.get("steps") or []) + [{"instruction": "Leave the vehicle at the end of the road and continue on foot", "distance_m": 0, "location": geom["coordinates"][-1]}] + (segs[1].get("steps") or [])
+
+    def _walk_only(self, origin: list[float], destination: list[float]) -> dict[str, Any] | None:
+        """No road route at all: if the place is close enough to walk, give a walking route instead of nothing."""
+        if haversine_km(origin, destination) > 12:
+            return None
+        w = self._walk_leg(origin, destination)
+        route = {"distance_km": w["distance_km"], "duration_min": w["duration_min"], "geometry": w["geometry"], "steps": w.get("steps") or [], "segments": [w], "drive_km": 0.0, "walk_km": w["distance_km"], "drive_min": 0.0, "walk_min": w["duration_min"]}
+        return {"status": "ok", "primary": route, "alternatives": [], "provider": "walking", "note": "No road route was found; this is a walking route.", "caveat": "Walking estimate only; terrain, wildlife, weather and permits are not verified."}
+
     def route(self, origin: list[float], destination: list[float], alternatives: bool = True) -> dict[str, Any]:
         if not self.available:
             return {"status": "unavailable", "reason": "No routing provider configured", "alternatives": []}
@@ -94,6 +153,12 @@ class Router:
                 continue
             if out["status"] == "ok":
                 out["caveat"] = CAVEAT
+                if out["primary"].get("geometry"):
+                    self._add_last_mile(out, destination)
+                else:
+                    for rt in [out["primary"], *out.get("alternatives", [])]:
+                        rt["segments"] = [{"mode": "drive", "distance_km": rt["distance_km"], "duration_min": rt["duration_min"], "geometry": None, "source": out.get("provider")}]
+                        rt["drive_km"], rt["walk_km"], rt["drive_min"], rt["walk_min"] = rt["distance_km"], 0.0, rt["duration_min"], 0.0
                 if errors:
                     out["fallback_note"] = "Earlier providers failed: " + "; ".join(errors)
                 snaps = [x for x in out.get("waypoint_snap_distance_m", []) if x]
@@ -101,6 +166,10 @@ class Router:
                     out["warning"] = "A waypoint is more than 500 m from the nearest road; the final approach is off-network (on foot or unmapped track)."
                 return out
             errors.append(f"{name}: {out.get('reason')}")
+        walk = self._walk_only(origin, destination)
+        if walk:
+            walk["fallback_note"] = "Road routing failed: " + "; ".join(errors)
+            return walk
         return {"status": "error", "reason": "All routing providers failed", "details": errors, "alternatives": []}
 
     def patrol(self, origin: list[float], stops: list[list[float]]) -> dict[str, Any]:

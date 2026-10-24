@@ -133,7 +133,7 @@ def test_notifications_need_confirmation_then_simulate_and_never_pretend():
     url = f"/api/v1/forest-change/records/{rid}/notify"
     assert client.post(url, headers=ADMIN, json={"channels": ["telegram"]}).status_code == 422          # not confirmed by a person
     client.patch(f"/api/v1/forest-change/records/{rid}", headers=REVIEWER, json={"status": "CONFIRMED"})
-    assert client.post(url, headers=REVIEWER, json={"channels": ["telegram"]}).status_code == 403        # reviewers cannot send
+    assert client.post(url, headers={"X-Role": "analyst"}, json={"channels": ["telegram"]}).status_code == 403    # analysts cannot send
     sim = client.post(url, headers=ADMIN, json={"channels": ["telegram", "ivr", "email", "dashboard"]}).json()
     by = {x["channel"]: x for x in sim["results"]}
     assert by["telegram"]["status"] == "SIMULATED" and by["ivr"]["status"] == "SIMULATED" and by["email"]["status"] == "SIMULATED" and by["dashboard"]["status"] == "SENT"
@@ -209,3 +209,49 @@ def test_case_studies_show_forest_shrinking_and_effects_building_up():
     steel = casestudies.build("steel-sal")
     assert steel["stages"][3]["metrics"]["patches"] == 2      # the road across the forest splits it in two
     assert client.get("/api/v1/forest-change/cases/nope", headers=ADMIN).status_code == 404
+
+
+def test_permits_show_their_exact_details_and_can_be_added_and_removed_by_hand():
+    rid = new_record(geom=shifted(7.0))
+    assert fw.verify(rid)["permits"] == []
+    body = {"authority": "State Forest Department", "permit_number": "FC/2026/114", "project_name": "Quarry road", "status": "issued", "valid_from": "2026-01-01", "valid_to": "2027-01-01", "source_url": "https://example.gov.in/p/114"}
+    r = client.post(f"/api/v1/forest-change/records/{rid}/permits", headers=REVIEWER, json=body)
+    assert r.status_code == 200
+    ver = r.json()
+    p = ver["permits"][0]
+    assert ver["class"] == "AUTHORIZED_RECORD_MATCH" and p["number"] == "FC/2026/114" and p["authority"] == "State Forest Department" and p["project"] == "Quarry road"
+    assert p["valid_from"] == "2026-01-01" and p["valid_to"] == "2027-01-01" and p["source_url"] == body["source_url"] and p["entered_by"] == "reviewer" and p["overlap"] >= 0.95
+    assert client.post(f"/api/v1/forest-change/records/{rid}/permits", headers=REVIEWER, json={**body, "permit_number": ""}).status_code == 422
+    assert client.post(f"/api/v1/forest-change/records/{rid}/permits", headers=REVIEWER, json={**body, "source_url": "javascript:alert(1)"}).status_code == 422
+    assert client.post(f"/api/v1/forest-change/records/{rid}/permits", headers={"X-Role": "read_only"}, json=body).status_code == 403
+    back = client.delete(f"/api/v1/forest-change/records/{rid}/permits/{p['id']}", headers=REVIEWER)
+    assert back.status_code == 200 and back.json()["permits"] == [] and back.json()["class"] == "NO_RECORD_FOUND"
+    # a permit that was not entered by hand (loaded from a register) cannot be deleted from here
+    other = str(uuid.uuid4())
+    insert("authorizations", {"id": other, "authority": "Register", "project_identifier": "R-1", "project_name": "Loaded", "status": "issued", "geometry": None, "dates": {}, "source_url": None, "evidence": {}, "created_at": now()})
+    assert client.delete(f"/api/v1/forest-change/records/{rid}/permits/{other}", headers=REVIEWER).status_code == 422
+
+
+def test_a_spot_can_be_removed_and_a_false_alarm_undone():
+    rid = new_record(geom=shifted(8.0))
+    assert client.patch(f"/api/v1/forest-change/records/{rid}", headers=REVIEWER, json={"status": "FALSE_POSITIVE"}).json()["status"] == "FALSE_POSITIVE"
+    assert client.patch(f"/api/v1/forest-change/records/{rid}", headers=REVIEWER, json={"status": "NEEDS_REVIEW"}).json()["status"] == "NEEDS_REVIEW"
+    assert client.delete(f"/api/v1/forest-change/records/{rid}", headers={"X-Role": "officer"}).status_code == 403
+    assert client.delete(f"/api/v1/forest-change/records/{rid}", headers=REVIEWER).status_code == 200
+    assert client.get(f"/api/v1/forest-change/records/{rid}", headers=ADMIN).status_code == 404
+
+
+def test_person_reported_incidents_get_the_same_two_decisions():
+    inc = client.post("/api/v1/incidents", headers=ADMIN, json={"title": "Trees cut by the river", "geometry": {"type": "Point", "coordinates": [78.2, 21.9]}, "evidence": {"kind": "cutting", "note": "saw a truck"}}).json()
+    iid = inc["id"]
+    script = client.get(f"/api/v1/incidents/{iid}/escalate/script", headers=ADMIN).json()["script"]
+    assert "illegal tree cutting" in script and "degrees north" in script and "has not been verified" in script
+    r = client.post(f"/api/v1/incidents/{iid}/escalate", headers=REVIEWER).json()
+    assert r["telegram"]["status"] == "NOT_CONFIGURED" and r["call"]["status"] == "NOT_CONFIGURED"      # keyless test server: honest, nothing pretended
+    assert client.post(f"/api/v1/incidents/{iid}/escalate", headers={"X-Role": "read_only"}).status_code == 403
+    assert client.post(f"/api/v1/incidents/{iid}/false-alarm", headers=REVIEWER).json()["status"] == "DISMISSED"
+    assert client.get(f"/api/v1/incidents/{iid}", headers=ADMIN).json()["status"] == "DISMISSED"
+    assert client.post(f"/api/v1/incidents/{iid}/reopen", headers=REVIEWER).json()["status"] == "DETECTED"
+    assert client.delete(f"/api/v1/incidents/{iid}", headers={"X-Role": "officer"}).status_code == 403
+    assert client.delete(f"/api/v1/incidents/{iid}", headers=REVIEWER).status_code == 200
+    assert client.get("/api/v1/calls/status?call_id=123", headers=ADMIN).json() == {"status": None, "duration_s": None, "hangup": None}

@@ -343,8 +343,8 @@ def run(region_id: str, year: int, n_months: int, ref_months: int, use_radar: bo
         end_date = date(*add_months(year, 1, n_months - 1), 28)
         orbit = s1_orbit(geom, date(*total_start, 1), end_date) if use_radar else None
         progress(f"Sentinel-1 orbit: {orbit}" if orbit else "Radar disabled", 0.02)
-        opt = series(geom, "sentinel-2", total_start, total_n, cfg, progress=lambda m: progress(m))
-        rad = series(geom, "sentinel-1", total_start, total_n, cfg, orbit=orbit, progress=lambda m: progress(m)) if use_radar else None
+        opt = series(geom, "sentinel-2", total_start, total_n, cfg, progress=lambda m, *a: progress(m))
+        rad = series(geom, "sentinel-1", total_start, total_n, cfg, orbit=orbit, progress=lambda m, *a: progress(m)) if use_radar else None
         progress("Detecting change…", 0.85)
         ref_end = (date(year, 1, 1) - EPOCH).days
         start_day = ref_end
