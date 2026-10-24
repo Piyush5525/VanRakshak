@@ -185,3 +185,9 @@ a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid #2e
 .journey .leg.walk{background:#fff1e8}.journey .leg.walk b{color:#b34700}
 .routeleg .ln{display:inline-block;width:22px;height:0;border-top:5px solid #14573c;border-radius:3px;vertical-align:middle;margin-right:6px}.routeleg .ln.walk{border-top:5px dotted #e8590c}
 .seg-ic{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:14px;background:#fff;border:2px solid #14573c;box-shadow:0 2px 6px rgba(0,0,0,.3)}.seg-ic.walk{border-color:#e8590c}
+
+/* area picker, grid cells */
+.areasel select{width:100%}.areasel{margin:8px 0 4px}
+.cell-badge{display:inline-grid;place-items:center;min-width:34px;height:34px;padding:0 6px;border-radius:9px;font-weight:700;font-size:13px;color:#3a1018;border:1px solid rgba(0,0,0,.15);flex:none}.cell-badge.big{min-width:44px;height:44px;font-size:16px}
+.cell-tag{background:rgba(255,255,255,.92);border:1px solid #7a1020;color:#7a1020;font-weight:700;font-size:11px;border-radius:6px;text-align:center;padding:0 4px;line-height:16px}.cell-tag.sel{background:#111;color:#fff;border-color:#111}
+.period{display:grid;grid-template-columns:100px 70px 1fr;gap:8px;align-items:center;padding:5px 0;font-size:13.5px}.period span{color:#5b6b66}.period .bar{height:9px;background:#eef1ef;border-radius:5px;overflow:hidden}.period .bar i{display:block;height:100%;background:#d7263d;border-radius:5px}

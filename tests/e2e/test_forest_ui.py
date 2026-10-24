@@ -31,7 +31,7 @@ fw._ingest(run, [{"geometry": sq(81.01, 21.71, 0.004), "area_ha": 3.4, "est_date
 '''
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()   # a fresh server and database for each test: one test removes the spot the other needs
 def seeded():
     tmp = tempfile.mkdtemp(prefix="rakshak-forest-e2e-")
     port = free_port()
@@ -115,5 +115,37 @@ def test_one_decision_per_spot_permits_with_exact_details_and_everything_can_be_
     page.click("#fcDel")
     page.click("#fcDel")
     page.wait_for_function("document.querySelector('#forestBody').innerText.includes('No loss spots')")
+    assert problems == []
+    ctx.close()
+
+
+def test_an_area_shows_only_its_own_spots_and_a_grid_of_cells_with_7_30_90_day_loss(seeded, browser):  # noqa: F811
+    ctx = browser.new_context(viewport={"width": 1500, "height": 950})
+    ctx.add_init_script("localStorage.setItem('rk.role','admin')")
+    page = ctx.new_page()
+    problems: list[str] = []
+    page.on("pageerror", lambda e: problems.append(f"pageerror: {e}"))
+    page.goto(seeded + "/live", wait_until="load")
+    page.wait_for_selector("#areaSel")
+    page.click("#win button[data-d='90']")
+    value = page.eval_on_selector_all("#areaSel option", "o => o[1].value")
+    page.select_option("#areaSel", value)                         # look at one checked area only
+    page.wait_for_selector("#forestBody .row-item[data-id]")
+    assert "in this area" in page.inner_text("#forestBody").lower()
+    page.click("#viewTabs button[data-v=grid]")                   # the same area cut into labelled cells
+    page.wait_for_selector("[data-cell]")
+    assert "grid cells with loss" in page.inner_text("#forestBody").lower() and page.is_checked("#showCover")
+    cell = page.get_attribute("[data-cell]", "data-cell")
+    page.click("[data-cell]")
+    page.wait_for_selector("#cellBack")
+    text = page.inner_text("#forestBody")
+    assert f"Cell {cell}" in text and "Last 7 days" in text and "Last 30 days" in text and "Last 90 days" in text and "Tree cover left" in text
+    page.click("#forestBody .row-item[data-id]")                  # a spot inside the cell opens, and Back returns to the cell
+    page.wait_for_selector("#fcEsc")
+    assert f"Back to cell {cell}" in page.inner_text("#fcBack")
+    page.click("#fcBack")
+    page.wait_for_selector("#cellBack")
+    page.click("#cellBack")
+    page.wait_for_selector("[data-cell]")
     assert problems == []
     ctx.close()

@@ -1,5 +1,6 @@
 """Forest-change watch API: scan an area, see tree cover and loss over time, review records, find the responsible office, notify."""
 import json
+from shapely.geometry import mapping
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -90,7 +91,7 @@ def start_scan(payload: ScanIn, role: Role = Depends(require_roles(*SCAN))):
 
 def _run_out(r: dict[str, Any], timeline: bool = False) -> dict[str, Any]:
     res = r.get("result") or {}
-    out = {"id": r["id"], "status": r["status"], "progress": r["progress"], "bbox": r["bbox"], "window_start": r["window_start"], "window_end": r["window_end"], "created_at": r["created_at"], "finished_at": r["finished_at"], "steps": res.get("steps", [])[-12:], "summary": res.get("summary"), "error": res.get("error")}
+    out = {"id": r["id"], "status": r["status"], "progress": r["progress"], "bbox": r["bbox"], "window_start": r["window_start"], "window_end": r["window_end"], "created_at": r["created_at"], "finished_at": r["finished_at"], "area_km2": round(fw.polygon_area_km2(mapping(fw.run_area(r))), 1), "polygon": (r.get("params") or {}).get("polygon"), "steps": res.get("steps", [])[-12:], "summary": res.get("summary"), "error": res.get("error")}
     if timeline:
         out["timeline"] = res.get("timeline", [])
     return out
@@ -111,6 +112,12 @@ def get_run(run_id: str, timeline: bool = False, role: Role = Depends(require_ro
     return _run_out(r, timeline)
 
 
+@api.get("/runs/{run_id}/grid")
+def run_grid(run_id: str, cell_m: float | None = Query(default=None, ge=100, le=5000), role: Role = Depends(require_roles(*READ))):
+    """The scanned area cut into labelled cells (A1, A2, B1…) with tree cover and loss for 7 / 30 / 90 days in each."""
+    return _wf(fw.grid, run_id, cell_m)
+
+
 @api.get("/timeline")
 def timeline(limit: int = Query(12, ge=1, le=60), role: Role = Depends(require_roles(*READ))):
     """Tree cover and loss snapshots (90 / 30 / 7 days ago, today) of every finished scan, newest first."""
@@ -127,10 +134,16 @@ def timeline(limit: int = Query(12, ge=1, le=60), role: Role = Depends(require_r
 
 
 @api.get("/records")
-def list_records(days: int = Query(90, ge=1, le=365), bbox: str | None = None, status: str | None = None, min_ha: float = 0.0, include_false: bool = False, role: Role = Depends(require_roles(*READ))):
+def list_records(days: int = Query(90, ge=1, le=365), run_id: str | None = None, bbox: str | None = None, status: str | None = None, min_ha: float = 0.0, include_false: bool = False, role: Role = Depends(require_roles(*READ))):
     box = [float(x) for x in bbox.split(",")] if bbox else None
     start = datetime.now(timezone.utc).date() - timedelta(days=days)
-    return fw.query(start=start, bbox=box, status=status, min_ha=min_ha, include_false=include_false)
+    within = None
+    if run_id:
+        run = get_one("fc_runs", "id", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        within = fw.run_area(run)
+    return fw.query(start=start, bbox=box, status=status, min_ha=min_ha, include_false=include_false, within=within)
 
 
 @api.get("/records/{rid}")

@@ -11,13 +11,13 @@ const SNAP = [[90, '90 days ago'], [30, '30 days ago'], [7, '7 days ago'], [0, '
 const D = (iso) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '–');
 const Dshort = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 const AGE = (d) => (d <= 7 ? '#d7263d' : d <= 30 ? '#f4802a' : '#e9b949');
-const S = { map: null, win: Number(localStorage.getItem('rk.win')) || 30, custom: null, status: null, snaps: [], snapDays: 0, records: [], sel: null, poll: null, evPoll: null, layers: {}, on: { cover: false, lost: false, scanned: false }, play: null, busy: false, scanOpen: false, drawn: null, drawing: false, drawKind: null, drawer: null, permitForm: false };
+const S = { map: null, win: Number(localStorage.getItem('rk.win')) || 30, custom: null, status: null, snaps: [], snapDays: 0, records: [], sel: null, poll: null, evPoll: null, layers: {}, on: { cover: false, lost: false, scanned: false }, play: null, busy: false, scanOpen: false, drawn: null, drawing: false, drawKind: null, drawer: null, permitForm: false, runs: [], area: null, view: 'spots', grids: {}, cell: null, fromCell: false };
 const role = () => localStorage.getItem('rk.role') || 'reviewer';
 const canJudge = () => ['admin', 'reviewer', 'officer'].includes(role());
 
 export function init({ map }) {
   S.map = map;
-  for (const k of ['cover', 'lost', 'records', 'route', 'was', 'scanned', 'area', 'drawn']) S.layers[k] = L.layerGroup().addTo(map);
+  for (const k of ['cover', 'lost', 'grid', 'cell', 'records', 'route', 'was', 'scanned', 'area', 'drawn', 'extent']) S.layers[k] = L.layerGroup().addTo(map);
   map.createPane('cover'); map.getPane('cover').style.zIndex = 330;
   map.on('moveend', drawArea);
   map.on('draw:created', (e) => {
@@ -29,7 +29,7 @@ export function init({ map }) {
   map.on('draw:drawstop', () => { if (S.drawing) { S.drawing = false; S.drawKind = null; S.drawer = null; drawArea(); paint(); } });   // Esc or a cancelled shape
   window.addEventListener('rk:watch-run', (e) => { S.busy = true; track(e.detail.id, scanCard('Watching real change near the factory')); });
   window.addEventListener('rk:tab', (e) => { if (e.detail !== 'tree') cancelDraw(); show(e.detail === 'tree'); });
-  window.addEventListener('rk:layers', (e) => { S.on.cover = S.on.lost = S.on.scanned = !!e.detail.cover; draw(); paint(); });
+  window.addEventListener('rk:layers', (e) => { S.on.cover = S.on.lost = S.on.scanned = !!e.detail.cover; if (e.detail.cover && S.runs.length) { S.area = S.area || S.runs[0].id; S.view = 'grid'; S.sel = null; S.cell = null; loadGrid(S.area).then(() => drawEverything()); } if (!e.detail.cover && S.view === 'grid') S.view = 'spots'; drawEverything(); });
   api('/forest-change/status').then((s) => { S.status = s; paint(); }).catch(() => {});
   api('/forest-change/runs?limit=3').then((rs) => { const r = rs.find((x) => ['QUEUED', 'RUNNING'].includes(x.status)); if (r) track(r.id, scanCard('Checking the area for tree loss')); }).catch(() => {});
   reload(); paint();
@@ -44,7 +44,13 @@ const active = () => $('#forestBody') && !$('#forestBody').hidden;
 const cur = () => S.sel && S.records.find((r) => r.id === S.sel);
 
 // ------------------------------------------------------------------ data
+async function loadRuns() {
+  try { const seen = new Set(); S.runs = (await api('/forest-change/runs?limit=60')).filter((r) => r.status === 'COMPLETE' && (r.summary?.forest_ha ?? 0) >= 1).filter((r) => { const k = JSON.stringify([r.bbox, r.polygon]); if (seen.has(k)) return false; seen.add(k); return true; }); } catch { /* the list still works without it */ }
+  if (S.area && !S.runs.find((r) => r.id === S.area)) S.area = null;
+}
+const drawEverything = () => { paint(); draw(); };
 async function reload() {
+  await loadRuns();
   try {
     const [tl, rec] = await Promise.all([api('/forest-change/timeline'), api(`/forest-change/records?days=${Math.max(S.win, 90)}&include_false=true`)]);
     S.snaps = tl; S.records = rec.map((r) => ({ ...(S.records.find((x) => x.id === r.id) || {}), ...r }));
@@ -52,10 +58,18 @@ async function reload() {
   if (S.sel && !cur()) S.sel = null;
   paint(); draw();
 }
+const areaOf = () => S.runs.find((r) => r.id === S.area) || null;
+const areaGeom = (r) => r.polygon || { type: 'Polygon', coordinates: [[[r.bbox[0], r.bbox[1]], [r.bbox[2], r.bbox[1]], [r.bbox[2], r.bbox[3]], [r.bbox[0], r.bbox[3]], [r.bbox[0], r.bbox[1]]]] };
+function inside(g, lon, lat) {   // ray casting over a GeoJSON Polygon / MultiPolygon
+  const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+  return polys.some((rings) => { let c = false; for (const ring of rings) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) c = !c; } return c; });
+}
+const inArea = (r) => { const a = areaOf(); return !a || inside(areaGeom(a), r.lon, r.lat); };
+const areaLabel = (r, k) => `Area ${S.runs.length - k} · ${r.area_km2} km² · ${new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${r.summary ? ` · ${r.summary.loss_ha} ha lost` : ''}`;
 const windowRecords = () => {
   const cut = S.custom ? S.custom.start : new Date(Date.now() - S.win * 864e5).toISOString().slice(0, 10);
   const end = S.custom ? S.custom.end : '9999';
-  return S.records.filter((r) => r.est_date >= cut && r.est_date <= end);
+  return S.records.filter((r) => r.est_date >= cut && r.est_date <= end && inArea(r));
 };
 function totals() {
   const at = (d) => { let forest = 0, lost = 0; for (const run of S.snaps) { const s = [...run.snapshots].filter((x) => x.days_ago >= d).sort((a, b) => a.days_ago - b.days_ago)[0]; if (s) { forest += s.forest_ha; lost += s.lost_ha; } } return { forest, lost }; };
@@ -95,7 +109,27 @@ function startDraw(kind) {
   S.drawer.enable(); paint(); toast(kind === 'rect' ? 'Click and drag on the map to draw a rectangle. Press Esc to stop' : 'Click each corner, then click the first point to finish. Press Esc to stop');
 }
 function snapAt(run, d) { return [...run.snapshots].filter((x) => x.days_ago >= d).sort((a, b) => a.days_ago - b.days_ago)[0]; }
+const lossColor = (v, max) => (v <= 0 ? '#cfe3d6' : (() => { const t = Math.min(1, v / Math.max(max, 0.01)); const a = [255, 213, 158], b = [179, 18, 42]; return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`; })());
+const gridDays = () => (S.custom ? 90 : S.win);
+async function loadGrid(id) {
+  if (!id) return null;
+  if (!S.grids[id]) S.grids[id] = await api(`/forest-change/runs/${id}/grid`).catch((e) => { toast(e.message, 'error'); return null; });
+  return S.grids[id];
+}
+function drawGrid() {
+  S.layers.grid.clearLayers(); S.layers.cell.clearLayers(); S.layers.extent.clearLayers();
+  const a = areaOf();
+  if (a) L.geoJSON(areaGeom(a), { style: { color: '#44524b', weight: 2, dashArray: '8 6', fill: false }, interactive: false }).addTo(S.layers.extent);
+  const g = a && S.grids[a.id]; if (!g || S.view !== 'grid' || cur()) return;
+  const w = String(gridDays()), max = Math.max(...g.cells.map((c) => c.loss_ha[w]), 0.01);
+  for (const c of g.cells) {
+    const v = c.loss_ha[w], sel = c.id === S.cell;
+    L.geoJSON(c.polygon, { style: { color: sel ? '#111' : v > 0 ? '#7a1020' : '#8aa89a', weight: sel ? 4 : 1, dashArray: v > 0 || sel ? null : '3 4', fillColor: lossColor(v, max), fillOpacity: sel ? 0 : S.cell ? (v > 0 ? 0.22 : 0.05) : v > 0 ? 0.55 : 0.1 } }).on('click', () => selectCell(c.id)).bindTooltip(`${c.id} · ${v} ha lost in the last ${w} days`, { sticky: true }).addTo(S.layers.grid);
+    if (v > 0) L.marker(L.geoJSON(c.polygon).getBounds().getCenter(), { icon: L.divIcon({ className: '', iconSize: [40, 18], iconAnchor: [20, 9], html: `<div class="cell-tag ${sel ? 'sel' : ''}">${esc(c.id)}</div>` }), interactive: false }).addTo(S.layers.grid);
+  }
+}
 function draw() {
+  drawGrid();
   for (const k of ['cover', 'lost', 'records', 'was', 'scanned', 'route']) S.layers[k].clearLayers();
   if (S.on.cover || S.on.lost) {
     for (const run of S.snaps) {
@@ -117,18 +151,30 @@ function draw() {
 }
 
 // ------------------------------------------------------------------ the list
-const label2 = (s) => ({ NEEDS_REVIEW: 'New', CONFIRMED: 'Escalated', FIELD_CHECK: 'Escalated', REPORTED: 'Escalated', FALSE_POSITIVE: 'False alarm', RESOLVED: 'Resolved' }[s] || s);
+const label2 = (s) => ({ NEEDS_REVIEW: 'New', CONFIRMED: 'Escalated', FIELD_CHECK: 'Escalated', REPORTED: 'Escalated', FALSE_POSITIVE: 'False alarm', SUPERSEDED: 'Not seen again', RESOLVED: 'Resolved' }[s] || s);
+function gridPanel() {
+  const a = areaOf(), g = a && S.grids[a.id], w = String(gridDays());
+  if (!a) return '<div class="empty"><b>Choose an area</b>Pick one of the areas you have checked.</div>';
+  if (!g) return '<div class="sub"><span class="spin"></span> Dividing the area into cells…</div>';
+  const cells = g.cells.filter((c) => c.loss_ha[w] > 0).sort((x, y) => y.loss_ha[w] - x.loss_ha[w]), max = Math.max(...cells.map((c) => c.loss_ha[w]), 0.01);
+  return `<h3>Grid cells with loss in the last ${w} days <span class="sub">(${cells.length} of ${g.cells.length}, cells of ${g.cell_m} m)</span></h3>
+    <div class="legend2"><span><i style="background:#ffd59e"></i>a little</span><span><i style="background:#b3122a"></i>most loss</span><span><i style="background:#cfe3d6"></i>none</span></div>
+    <div class="list">${cells.length ? cells.map((c) => `<button class="row-item" data-cell="${esc(c.id)}"><span class="cell-badge" style="background:${lossColor(c.loss_ha[w], max)}">${esc(c.id)}</span><span class="grow"><b>${c.loss_ha[w]} ha lost</b><small>${c.spots.length} spot${c.spots.length === 1 ? '' : 's'} · ${c.cover_ha['0']} ha of tree cover left</small></span></button>`).join('') : '<div class="empty"><b>No loss in this time</b>No cell lost tree cover in the last ' + w + ' days. Try a longer time.</div>'}</div>`;
+}
 function paint() {
   const box = $('#forestBody'); if (!box) return;
   if (cur()) return paintRecord(box, cur());
-  const recs = windowRecords().filter((r) => r.status !== 'FALSE_POSITIVE').sort((a, b) => b.area_ha - a.area_ha);
-  const haveData = S.snaps.length > 0;
+  if (S.cell && areaOf() && S.grids[S.area]?.cells.find((c) => c.id === S.cell)) return paintCell(box);
+  const recs = windowRecords().filter((r) => !['FALSE_POSITIVE', 'SUPERSEDED'].includes(r.status)).sort((a, b) => b.area_ha - a.area_ha);
+  const haveData = S.snaps.length > 0, grid = S.view === 'grid' && S.runs.length;
   box.innerHTML = html`
-    <div class="side-head" style="padding-left:0"><div><h2>Tree loss</h2><div class="sub">Choose a spot to see it on the map</div></div></div>
+    <div class="side-head" style="padding-left:0"><div><h2>Tree loss</h2><div class="sub">${grid ? 'Choose a cell to see how it changed' : 'Choose a spot to see it on the map'}</div></div></div>
     <div class="pills" id="win">${raw([7, 30, 90].map((d) => `<button data-d="${d}" class="${!S.custom && S.win === d ? 'on' : ''}">${d} days</button>`).join('') + `<button data-d="c" class="${S.custom ? 'on' : ''}">Custom</button>`)}</div>
     ${raw(S.custom ? `<div class="row2" id="cust"><input type="date" id="cFrom" value="${esc(S.custom.start)}" max="${new Date().toISOString().slice(0, 10)}"><input type="date" id="cTo" value="${esc(S.custom.end)}" max="${new Date().toISOString().slice(0, 10)}"></div>` : '')}
-    <h3>Loss spots ${S.custom ? `${S.custom.start} → ${S.custom.end}` : `in the last ${S.win} days`} <span class="sub">(${recs.length})</span></h3>
-    <div class="list">${recs.length ? raw(recs.map((r) => `<button class="row-item" data-id="${esc(r.id)}"><span class="dot2" style="background:${AGE(r.age_days)}"></span><span class="grow"><b>${esc(r.code)} · ${r.area_ha} ha</b><small>${esc(Dshort(r.est_date))} · ${esc(r.age_days)} d ago${(r.verification?.permits || []).length ? ' · permit found' : ''}</small></span><span class="chip ${['CONFIRMED', 'FIELD_CHECK', 'REPORTED'].includes(r.status) ? 'red' : ''}">${esc(label2(r.status))}</span></button>`).join('')) : raw(haveData ? '<div class="empty"><b>No loss spots in this time</b>Either nothing was cleared, or clouds hid the area. Try 90 days.</div>' : '<div class="empty"><b>Nothing checked yet</b>Open “Check a new area” below.</div>')}</div>
+    ${raw(S.runs.length ? `<label class="f areasel">Area<select id="areaSel"><option value="">Everywhere I have checked</option>${S.runs.map((r, k) => `<option value="${esc(r.id)}" ${S.area === r.id ? 'selected' : ''}>${esc(areaLabel(r, k))}</option>`).join('')}</select></label>
+      <div class="pills" id="viewTabs"><button data-v="spots" class="${S.view === 'spots' ? 'on' : ''}">Loss spots (${recs.length})</button><button data-v="grid" class="${S.view === 'grid' ? 'on' : ''}">Grid</button></div>` : '')}
+    ${raw(grid ? gridPanel() : `<h3>Loss spots ${S.custom ? `${S.custom.start} → ${S.custom.end}` : `in the last ${S.win} days`}${areaOf() ? ' in this area' : ''} <span class="sub">(${recs.length})</span></h3>
+    <div class="list">${recs.length ? recs.map((r) => `<button class="row-item" data-id="${esc(r.id)}"><span class="dot2" style="background:${AGE(r.age_days)}"></span><span class="grow"><b>${esc(r.code)} · ${r.area_ha} ha</b><small>${esc(Dshort(r.est_date))} · ${esc(r.age_days)} d ago${(r.verification?.permits || []).length ? ' · permit found' : ''}</small></span><span class="chip ${['CONFIRMED', 'FIELD_CHECK', 'REPORTED'].includes(r.status) ? 'red' : ''}">${esc(label2(r.status))}</span></button>`).join('') : (haveData ? '<div class="empty"><b>No loss spots here in this time</b>Either nothing was cleared, or clouds hid the area. Try 90 days.</div>' : '<div class="empty"><b>Nothing checked yet</b>Open “Check a new area” below.</div>')}</div>`)}
     <details id="scanBox" class="scanbox" ${S.scanOpen || !haveData ? 'open' : ''}><summary><span>Check a new area</span></summary>
       <div class="sub">Draw a rectangle or any shape around a forest anywhere in India, or use the middle of the map.</div>
       <div class="row2" style="margin-top:8px"><button class="btn sm ${S.drawing && S.drawKind === 'rect' ? 'primary' : ''}" id="dRect" aria-pressed="${S.drawing && S.drawKind === 'rect'}">${S.drawing && S.drawKind === 'rect' ? '✕ Stop drawing' : '▭ Draw a rectangle'}</button><button class="btn sm ${S.drawing && S.drawKind === 'poly' ? 'primary' : ''}" id="dPoly" aria-pressed="${S.drawing && S.drawKind === 'poly'}">${S.drawing && S.drawKind === 'poly' ? '✕ Stop drawing' : '⬠ Draw a shape'}</button>${S.drawn ? raw('<button class="btn sm" id="dClear">✕ Clear shape</button>') : ''}</div>
@@ -136,6 +182,31 @@ function paint() {
       <button class="btn primary big" id="scan" ${S.busy || S.drawing ? 'disabled' : ''}>${S.busy ? 'Checking satellites…' : '🛰 Check this area for tree loss'}</button>
       <div id="prog"></div></details>`;
   bind(box); drawArea();
+}
+// ---- one grid cell: how it changed over 7 / 30 / 90 days, and the spots inside it
+async function selectCell(id) {
+  S.cell = id; S.sel = null; S.view = 'grid';
+  const g = S.grids[S.area], c = g?.cells.find((x) => x.id === id); if (!c) return;
+  S.map.fitBounds(L.geoJSON(c.polygon).getBounds().pad(0.6), { maxZoom: 17 });
+  drawEverything();
+}
+function paintCell(box) {
+  const c = S.grids[S.area].cells.find((x) => x.id === S.cell), l = c.loss_ha, cv = c.cover_ha, end = S.grids[S.area].window_end;
+  const bar = (v, max) => `<div class="bar"><i style="width:${Math.min(100, (v / Math.max(max, 0.01)) * 100)}%"></i></div>`;
+  box.innerHTML = html`
+    <button class="back" id="cellBack">‹ All cells</button>
+    <div class="row-item" style="border:0;padding:6px 0"><span class="cell-badge big" style="background:${lossColor(l['90'], l['90'])}">${c.id}</span><span class="grow"><h2 style="font-size:18px">Cell ${c.id}</h2><div class="sub">${c.area_ha} ha · checked up to ${D(end)}</div></span></div>
+    <div class="sect"><h4>Tree loss in this cell</h4>
+      <div class="period"><span>Last 7 days</span><b>${l['7']} ha</b>${raw(bar(l['7'], l['90']))}</div>
+      <div class="period"><span>Last 30 days</span><b>${l['30']} ha</b>${raw(bar(l['30'], l['90']))}</div>
+      <div class="period"><span>Last 90 days</span><b>${l['90']} ha</b>${raw(bar(l['90'], l['90']))}</div></div>
+    <div class="sect"><h4>Tree cover left</h4>
+      <div class="stat4"><div><b>${cv['90']} ha</b><span>90 days ago</span></div><div><b>${cv['30']} ha</b><span>30 days ago</span></div><div><b>${cv['7']} ha</b><span>7 days ago</span></div><div><b>${cv['0']} ha</b><span>today</span></div></div>
+      <div class="sub">${cv['90'] > cv['0'] ? `Down ${(cv['90'] - cv['0']).toFixed(2)} ha since 90 days ago.` : 'No drop in tree cover in this cell.'}</div></div>
+    <div class="sect"><h4>Loss spots in this cell (${c.spots.length})</h4>
+      <div class="list">${raw(c.spots.length ? c.spots.map((s2) => `<button class="row-item" data-id="${esc(s2.id)}"><span class="dot2" style="background:${AGE(s2.age_days)}"></span><span class="grow"><b>${esc(s2.code)} · ${s2.area_ha} ha</b><small>${esc(Dshort(s2.est_date))} · ${s2.age_days} d ago</small></span><span class="chip ${['CONFIRMED', 'FIELD_CHECK', 'REPORTED'].includes(s2.status) ? 'red' : ''}">${esc(label2(s2.status))}</span></button>`).join('') : '<div class="sub">No single clearing is large enough to list; the loss is made of small patches.</div>')}</div></div>`;
+  $('#cellBack', box).onclick = () => { S.cell = null; S.layers.cell.clearLayers(); drawEverything(); };
+  $$('.row-item', box).forEach((b) => (b.onclick = () => { S.fromCell = true; select(b.dataset.id, true); }));
 }
 function bind(box) {
   $('#scanBox summary', box)?.addEventListener('click', () => setTimeout(() => { S.scanOpen = $('#scanBox').open; drawArea(); }, 0));
@@ -147,10 +218,13 @@ function bind(box) {
   };
   $('#cFrom', box)?.addEventListener('change', (e) => { S.custom.start = e.target.value; paint(); });
   $('#cTo', box)?.addEventListener('change', (e) => { S.custom.end = e.target.value; paint(); });
+  $('#areaSel', box)?.addEventListener('change', async (e) => { S.area = e.target.value || null; S.cell = null; drawEverything(); if (S.area) { await loadGrid(S.area); const a = areaOf(); if (a) S.map.fitBounds(L.geoJSON(areaGeom(a)).getBounds().pad(0.1)); drawEverything(); } });
+  $('#viewTabs', box)?.addEventListener('click', async (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; S.cell = null; if (v === 'grid') { S.area = S.area || S.runs[0]?.id; S.on.cover = S.on.lost = true; const cb = $('#showCover'); if (cb) cb.checked = true; await loadGrid(S.area); const a = areaOf(); if (a) S.map.fitBounds(L.geoJSON(areaGeom(a)).getBounds().pad(0.1)); } drawEverything(); });
+  $$('[data-cell]', box).forEach((b) => (b.onclick = () => selectCell(b.dataset.cell)));
   $('#scan', box).onclick = startScan;
   $('#dRect', box).onclick = () => startDraw('rect'); $('#dPoly', box).onclick = () => startDraw('poly');
   $('#dClear', box)?.addEventListener('click', () => { cancelDraw(); S.drawn = null; showDrawn(); drawArea(); paint(); });
-  $$('.row-item', box).forEach((b) => (b.onclick = () => select(b.dataset.id, true)));
+  $$('.row-item[data-id]', box).forEach((b) => (b.onclick = () => select(b.dataset.id, true)));
 }
 function setSnap(d) { S.snapDays = d; S.on.cover = S.on.lost = true; const cb = $('#showCover'); if (cb) cb.checked = true; paint(); draw(); }
 function playSnaps() { clearInterval(S.play); let i = 0; setSnap(SNAP[0][0]); S.play = setInterval(() => { i++; if (i >= SNAP.length) return clearInterval(S.play); setSnap(SNAP[i][0]); }, 1600); }
@@ -179,7 +253,7 @@ function track(id, card) {
     const s = r.summary;
     const msg = s.forest_ha < 1 ? 'No forest was found in this area (it looks like farmland or built-up land), so there is nothing to check.' : s.patches ? `${s.loss_ha} ha of tree loss found in ${s.patches} spot${s.patches > 1 ? 's' : ''} (${s.loss_pct_of_forest ?? 0}% of ${Math.round(s.forest_ha)} ha of forest).` : `No tree loss found in ${Math.round(s.forest_ha)} ha of forest.`;
     card?.done(msg);
-    S.scanOpen = false; reload().then(() => { S.snapDays = 0; S.on.cover = S.on.lost = s.forest_ha >= 1; const cb = $('#showCover'); if (cb) cb.checked = S.on.cover; paint(); draw(); const e2 = $('#prog'); if (e2) e2.innerHTML = `<div class="banner2 ${s.patches ? 'amber' : 'green'}">${esc(msg)}${s.warnings.length ? `<div class="sub">${esc(s.warnings.join(' '))}</div>` : ''}</div>`; });
+    S.scanOpen = false; S.drawn = null; showDrawn(); reload().then(async () => { S.area = id; S.cell = null; S.view = 'spots'; S.win = 90; S.custom = null; await loadGrid(id); S.snapDays = 0; S.on.cover = S.on.lost = s.forest_ha >= 1; const cb = $('#showCover'); if (cb) cb.checked = S.on.cover; paint(); draw(); const e2 = $('#prog'); if (e2) e2.innerHTML = `<div class="banner2 ${s.patches ? 'amber' : 'green'}">${esc(msg)}${s.warnings.length ? `<div class="sub">${esc(s.warnings.join(' '))}</div>` : ''}</div>`; });
     const b = r.bbox; S.map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [30, 30] });
   };
   S.poll = setInterval(tick, 2500); tick();
@@ -247,7 +321,7 @@ function historySection() {
 function paintRecord(box, r) {
   const a = r.authority, rt = r.route;
   box.innerHTML = html`
-    <button class="back" id="fcBack">‹ All loss spots</button>
+    <button class="back" id="fcBack">‹ ${S.fromCell ? 'Back to cell ' + S.cell : 'All loss spots'}</button>
     <div class="row-item" style="border:0;padding:6px 0"><span class="dot2" style="background:${AGE(r.age_days)};width:14px;height:14px"></span><span class="grow"><h2 style="font-size:18px">${r.code} · ${r.area_ha} ha</h2><div class="sub">${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}</div></span><span class="chip ${r.severity === 'HIGH' ? 'red' : r.severity === 'MEDIUM' ? 'amber' : ''}">${r.severity} size</span></div>
     <div class="facts"><div><b>${Dshort(r.est_date)}</b><span>about when (±${Math.round(r.date_uncertainty_days || 0)} d)</span></div><div><b>${r.age_days} days</b><span>ago</span></div><div><b>${r.seen_count}×</b><span>seen in scans</span></div></div>
     ${raw(permitSection(r))}
@@ -256,7 +330,7 @@ function paintRecord(box, r) {
     ${raw(historySection())}
     <div class="sect"><h4>Record</h4><div id="recAct"></div></div>
     <details class="more"><summary>More</summary><div class="row2" style="margin-top:8px"><button class="btn sm" id="fcGeo">⬇ Export GeoJSON</button><button class="btn sm danger" id="fcDel">− Remove this spot</button></div></details>`;
-  $('#fcBack', box).onclick = () => { S.sel = null; clearInterval(S.evPoll); paint(); draw(); };
+  $('#fcBack', box).onclick = () => { S.sel = null; clearInterval(S.evPoll); if (!S.fromCell) S.cell = null; S.fromCell = false; drawEverything(); if (S.cell) selectCell(S.cell); };
   $('#fcEsc', box)?.addEventListener('click', escalate);
   $('#fcFalse', box)?.addEventListener('click', falseAlarm);
   $('#fcUndo', box)?.addEventListener('click', () => patch({ status: 'NEEDS_REVIEW' }, 'Back in review'));

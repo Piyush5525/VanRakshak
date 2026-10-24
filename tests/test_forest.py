@@ -255,3 +255,57 @@ def test_person_reported_incidents_get_the_same_two_decisions():
     assert client.delete(f"/api/v1/incidents/{iid}", headers={"X-Role": "officer"}).status_code == 403
     assert client.delete(f"/api/v1/incidents/{iid}", headers=REVIEWER).status_code == 200
     assert client.get("/api/v1/calls/status?call_id=123", headers=ADMIN).json() == {"status": None, "duration_s": None, "hangup": None}
+
+
+def _scan_with_history(days_ago_of_spots):
+    """A finished scan of a 2 km box with a 100 ha forest, and loss spots at the given ages (synthetic, for this test only)."""
+    from shapely.geometry import box as _box, mapping as _map
+    w, s, e, n = 95.0, 21.70, 95.02, 21.72
+    def sq(x, y, d): return _map(_box(x, y, x + d, y + d))
+    snaps = [{"days_ago": d, "date": (TODAY - timedelta(days=d)).isoformat(), "forest_ha": 100.0 - lost, "lost_ha": lost, "forest": _map(_box(w, s, e, n)), "lost": None} for d, lost in ((90, 0.0), (30, 1.0), (7, 2.0), (0, 3.0))]
+    run = str(uuid.uuid4())
+    insert("fc_runs", {"id": run, "status": "COMPLETE", "progress": 1.0, "bbox": [w, s, e, n], "window_start": (TODAY - timedelta(days=90)).isoformat(), "window_end": TODAY.isoformat(), "window_days": 90, "params": {}, "result": {"steps": [], "summary": {}, "timeline": snaps}, "created_by": "t", "created_at": now(), "finished_at": now()})
+    ids = []
+    for k, age in enumerate(days_ago_of_spots):
+        fw._ingest(run, [patch_dict(sq(95.002 + 0.0009 * k, 21.702, 0.0006), area=0.5, est=TODAY - timedelta(days=age))], "t")
+        with connection() as conn:
+            ids.append(dict(conn.execute("SELECT id FROM fc_records ORDER BY created_at DESC LIMIT 1").fetchone())["id"])
+    return run, ids
+
+
+def test_a_scanned_area_is_cut_into_labelled_cells_with_loss_for_7_30_and_90_days():
+    run, ids = _scan_with_history([3, 20, 60])
+    g = client.get(f"/api/v1/forest-change/runs/{run}/grid", headers=ADMIN).json()
+    assert g["cell_m"] >= 250 and g["cells"] and all(c["id"][0].isalpha() and c["id"][1:].isdigit() for c in g["cells"])
+    top = g["cells"][0]                                   # sorted by the most loss in 90 days
+    assert top["loss_ha"]["90"] >= top["loss_ha"]["30"] >= top["loss_ha"]["7"] > 0
+    assert {s["id"] for s in top["spots"]} <= set(ids) and top["cover_ha"]["90"] >= top["cover_ha"]["0"] and top["polygon"]["type"] == "Polygon"
+    assert g["totals"]["90"] >= g["totals"]["30"] >= g["totals"]["7"] > 0
+    assert client.get(f"/api/v1/forest-change/runs/{uuid.uuid4()}/grid", headers=ADMIN).status_code == 422
+
+
+def test_the_list_can_be_limited_to_one_scanned_area_and_a_drawn_shape_is_remembered():
+    run, ids = _scan_with_history([10])
+    far = new_record(geom=shifted(40.0))                  # a spot far outside that scan
+    inside = {r["id"] for r in client.get(f"/api/v1/forest-change/records?days=90&run_id={run}", headers=ADMIN).json()}
+    assert ids[0] in inside and far not in inside
+    r = client.get(f"/api/v1/forest-change/runs/{run}", headers=ADMIN).json()
+    assert r["polygon"] is None and r["area_km2"] > 1
+    assert client.get(f"/api/v1/forest-change/records?days=90&run_id={uuid.uuid4()}", headers=ADMIN).status_code == 404
+
+
+def test_a_newer_stricter_scan_sets_aside_unseen_spots_but_never_a_persons_decision():
+    from datetime import date as _d
+    far = shifted(60.0)
+    a = new_record(geom=far)
+    b = new_record(geom=shifted(60.2))
+    client.patch(f"/api/v1/forest-change/records/{b}", headers=REVIEWER, json={"status": "CONFIRMED"})   # a person decided this one
+    new_run = str(uuid.uuid4())
+    area = {"type": "Polygon", "coordinates": [[[141.0, 21.69], [141.4, 21.69], [141.4, 21.72], [141.0, 21.72], [141.0, 21.69]]]}
+    assert fw._retire_unseen(new_run, area, TODAY - timedelta(days=90)) == 1
+    statuses = {r["id"]: r["status"] for r in client.get("/api/v1/forest-change/records?days=90&include_false=true", headers=ADMIN).json()}
+    assert statuses[a] == "SUPERSEDED" and statuses[b] == "CONFIRMED"
+    assert a not in [r["id"] for r in client.get("/api/v1/forest-change/records?days=90", headers=ADMIN).json()]
+    # seen again later: it comes back for review; and Undo also works
+    fw._ingest(str(uuid.uuid4()), [patch_dict(far)], "t")
+    assert {r["id"]: r["status"] for r in client.get("/api/v1/forest-change/records?days=90", headers=ADMIN).json()}[a] == "NEEDS_REVIEW"

@@ -6,6 +6,7 @@ Everything here is a *candidate* from satellite evidence. Nothing states that an
 forest authority after field verification. Missing data is reported as missing, never filled in.
 """
 import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import math
@@ -20,16 +21,19 @@ from typing import Any
 
 import httpx
 import numpy as np
+from pyproj import Transformer
+from scipy import ndimage
 from rasterio import features as rio_features
 from rasterio.warp import transform_geom
 from shapely.geometry import Polygon, box, mapping
 from shapely import set_precision as shp_set_precision
-from shapely.ops import unary_union
+from shapely.ops import transform as shp_transform, unary_union
 
 from app.core.config import get_settings
 from app.core.geometry import geodesic_area_hectares, to_shape
 from app.db.database import audit, connection, decode_row, get_one, insert, now, update
 from app.services import alerts, boundary, firecomms, geoanalysis, navigation
+from app.services.acquisition import provider
 from app.services.osm import OsmUnavailable, fetch
 from app.services.routing import haversine_km
 from app.services.satellite import AcquisitionConfig, ProviderError
@@ -41,7 +45,7 @@ MAX_AREA_KM2 = 240.0
 MIN_WINDOW, MAX_WINDOW = 3, 180
 HISTORY_DAYS = 90   # every scan reaches back this far so the tree-cover history (90 / 30 / 7 days ago) can be drawn
 SNAPSHOTS = (90, 30, 7, 0)
-STATUSES = ("NEEDS_REVIEW", "CONFIRMED", "FALSE_POSITIVE", "FIELD_CHECK", "REPORTED", "RESOLVED")
+STATUSES = ("NEEDS_REVIEW", "CONFIRMED", "FALSE_POSITIVE", "FIELD_CHECK", "REPORTED", "RESOLVED", "SUPERSEDED")
 SETTABLE = ("NEEDS_REVIEW", "CONFIRMED", "FALSE_POSITIVE", "FIELD_CHECK", "RESOLVED")
 NOTIFIABLE = ("CONFIRMED", "FIELD_CHECK", "REPORTED")
 CATEGORIES = {"suspected_felling": "Suspected tree felling", "fire_damage": "Fire damage", "agriculture": "Agriculture / clearing for crops", "authorised_work": "Authorised work", "natural": "Natural cause (storm, landslide, flood)", "infrastructure": "Road / building / infrastructure", "other": "Other"}
@@ -199,6 +203,16 @@ def scan(run_id: str, bbox: list[float], start: date, end: date, use_radar: bool
             inside = rio_features.rasterize([(transform_geom("EPSG:4326", grid.crs, polygon), 1)], out_shape=fused["forest"].shape, transform=grid.transform, fill=0, dtype="uint8").astype(bool)
             fused["evidence"][~inside] = 0
             fused["forest"] &= inside
+        forest_basis = "greenness before the window (no land-cover map available)"
+        try:   # farmland, gardens and scattered greenery are green too: keep only what the land-cover map calls tree cover
+            lc = provider().worldcover_classes(geom, grid)
+            tree = ndimage.binary_dilation(lc == 10, iterations=1)   # one pixel of tolerance between the 10 m map and the 30 m grid
+            fused["evidence"][~tree] = 0
+            fused["forest"] &= tree
+            forest_basis = "ESA WorldCover tree cover (10 m), plus a green baseline"
+            _step(run_id, steps, f"Forest limited to mapped tree cover: {int(fused['forest'].sum())} of the area's pixels", 0.9)
+        except Exception as exc:  # noqa: BLE001 - the scan still works without it, and says so
+            _step(run_id, steps, f"Land-cover map unavailable ({type(exc).__name__}); forest judged by greenness only", 0.9, "warning")
         patches = alerts.extract_patches(fused, grid, params)
         px_ha = abs(grid.transform.a * grid.transform.e) / 1e4
         win = [w for w in opt["when"] if w.date() >= start]
@@ -212,8 +226,11 @@ def scan(run_id: str, bbox: list[float], start: date, end: date, use_radar: bool
             warnings.append(f"Mean clear-sky coverage in the window is {clear:.0%}: clouds hide much of the area.")
         forest_ha = float(fused["forest"].sum()) * px_ha
         created, linked = _ingest(run_id, patches, actor)
+        retired = _retire_unseen(run_id, polygon if polygon else mapping(box(*bbox)), start)
         timeline = _timeline(fused, patches, grid, end, (end - start).days)
-        summary = {"forest_ha": round(forest_ha, 1), "loss_ha": round(sum(p["area_ha"] for p in patches), 2), "loss_pct_of_forest": round(100 * sum(p["area_ha"] for p in patches) / forest_ha, 2) if forest_ha else None, "patches": len(patches), "new_records": created, "linked_to_existing": linked, "optical_dates_in_window": len(win), "radar_dates_in_window": len(rwin), "mean_clear_fraction_in_window": round(clear, 3), "radar_used": rad is not None, "resolution_m": cfg.resolution_m, "warnings": warnings}
+        if forest_basis.startswith("greenness"):
+            warnings.append("No land-cover map was available, so crops and gardens may be counted as forest.")
+        summary = {"retired_spots": retired, "forest_basis": forest_basis, "forest_ha": round(forest_ha, 1), "loss_ha": round(sum(p["area_ha"] for p in patches), 2), "loss_pct_of_forest": round(100 * sum(p["area_ha"] for p in patches) / forest_ha, 2) if forest_ha else None, "patches": len(patches), "new_records": created, "linked_to_existing": linked, "optical_dates_in_window": len(win), "radar_dates_in_window": len(rwin), "mean_clear_fraction_in_window": round(clear, 3), "radar_used": rad is not None, "resolution_m": cfg.resolution_m, "warnings": warnings}
         summary["timeline_points"] = len(timeline)
         _step(run_id, steps, f"Done: {len(patches)} loss patch(es), {created} new record(s), {linked} matched to existing records" + (f". Note: {warnings[0]}" if warnings else ""), 1.0)
         update("fc_runs", "id", run_id, {"status": "COMPLETE", "progress": 1.0, "result": {"steps": steps[-60:], "summary": summary, "timeline": timeline}, "finished_at": now()})
@@ -274,6 +291,88 @@ def needed_months(start: date, end: date) -> list[tuple[int, int]]:
     return sorted(out)
 
 
+def run_area(run: dict[str, Any]):
+    """The shape a scan covered: the polygon the user drew, or the box."""
+    poly = (run.get("params") or {}).get("polygon")
+    return to_shape(poly) if poly else box(*run["bbox"])
+
+
+def _col(i: int) -> str:
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def grid(run_id: str, cell_m: float | None = None) -> dict[str, Any]:
+    """Split a scanned area into square cells (A1, A2, B1…). Each cell reports how much tree cover it had 90 / 30 / 7 days ago and
+    today, and how much was lost in the last 7 / 30 / 90 days, with the loss spots inside it."""
+    run = get_one("fc_runs", "id", run_id)
+    if not run or run["status"] != "COMPLETE":
+        raise WatchError("That scan is not finished")
+    res = run["result"] or {}
+    snaps = {s["days_ago"]: s for s in res.get("timeline", [])}
+    area = run_area(run)
+    c = area.centroid
+    to_m = Transformer.from_crs("EPSG:4326", f"+proj=aeqd +lat_0={c.y} +lon_0={c.x} +datum=WGS84", always_xy=True)
+    to_ll = Transformer.from_crs(f"+proj=aeqd +lat_0={c.y} +lon_0={c.x} +datum=WGS84", "EPSG:4326", always_xy=True)
+    area_m = shp_transform(to_m.transform, area)
+    minx, miny, maxx, maxy = area_m.bounds
+    cell = cell_m or max(250.0, math.ceil(math.sqrt(area_m.area / 360.0) / 50.0) * 50.0)
+    cover = {d: (shp_transform(to_m.transform, to_shape(s["forest"])) if s.get("forest") else None) for d, s in snaps.items()}
+    today = date.fromisoformat(run["window_end"])
+    with connection() as conn:
+        rows = [_dec(decode_row(dict(r))) for r in conn.execute("SELECT * FROM fc_records WHERE lon BETWEEN ? AND ? AND lat BETWEEN ? AND ? AND status NOT IN ('FALSE_POSITIVE', 'SUPERSEDED')", (run["bbox"][0], run["bbox"][2], run["bbox"][1], run["bbox"][3]))]
+    spots = [(r, shp_transform(to_m.transform, to_shape(r["geometry"])), (today - date.fromisoformat(r["est_date"])).days) for r in rows]
+    spots = [x for x in spots if 0 <= x[2] <= 90 and area_m.intersects(x[1])]
+    ha = lambda g: round(g.area / 1e4, 2) if g is not None and not g.is_empty else 0.0  # noqa: E731
+    cells, ncols = [], int(math.ceil((maxx - minx) / cell))
+    nrows = int(math.ceil((maxy - miny) / cell))
+    for ix in range(ncols):
+        for iy in range(nrows):
+            sq = box(minx + ix * cell, maxy - (iy + 1) * cell, minx + (ix + 1) * cell, maxy - iy * cell)
+            part = sq.intersection(area_m)
+            if part.is_empty or part.area < cell * cell * 0.05:
+                continue
+            cov = {str(d): ha(g.intersection(part)) if g is not None else 0.0 for d, g in cover.items()}
+            loss = {"7": 0.0, "30": 0.0, "90": 0.0}
+            inside = []
+            for r, g, age in spots:
+                if not g.intersects(part):
+                    continue
+                a = g.intersection(part).area / 1e4
+                for w in (7, 30, 90):
+                    if age <= w:
+                        loss[str(w)] += a
+                inside.append({"id": r["id"], "code": r["code"], "area_ha": r["area_ha"], "est_date": r["est_date"], "age_days": age, "status": r["status"]})
+            if not inside and not any(cov.values()):
+                continue
+            loss = {k: round(v, 2) for k, v in loss.items()}
+            cells.append({"id": f"{_col(ix)}{iy + 1}", "polygon": mapping(shp_set_precision(shp_transform(to_ll.transform, part), 1e-5)), "area_ha": ha(part), "cover_ha": cov, "loss_ha": loss, "spots": sorted(inside, key=lambda s: -s["area_ha"])})
+    cells.sort(key=lambda c_: (-c_["loss_ha"]["90"], c_["id"]))
+    return {"run_id": run_id, "cell_m": cell, "window_end": run["window_end"], "cells": cells, "totals": {k: round(sum(c_["loss_ha"][k] for c_ in cells), 2) for k in ("7", "30", "90")}}
+
+
+def _retire_unseen(run_id: str, area: dict[str, Any], start: date) -> int:
+    """A spot that no one has judged, from an earlier scan of this same ground, that a fresh and stricter scan did not find again,
+    is set aside as 'not seen again' (it stays in the record and can be brought back with Undo). People's decisions are never touched."""
+    from shapely.geometry import Point
+    shp = to_shape(area).buffer(1e-4)
+    w, s_, e, n = shp.bounds
+    with connection() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT id, lon, lat, history FROM fc_records WHERE status = 'NEEDS_REVIEW' AND last_run_id != ? AND est_date >= ? AND lon BETWEEN ? AND ? AND lat BETWEEN ? AND ?", (run_id, start.isoformat(), w, e, s_, n))]
+    count = 0
+    for r in rows:
+        if not shp.contains(Point(r["lon"], r["lat"])):
+            continue
+        hist = (json.loads(r["history"]) if r["history"] else []) + [{"at": now(), "by": "system", "change": "not seen again in a newer scan of this ground (set aside; Undo brings it back)"}]
+        update("fc_records", "id", r["id"], {"status": "SUPERSEDED", "history": hist, "updated_at": now()})
+        count += 1
+    return count
+
+
 def severity(area_ha: float) -> str:
     return "HIGH" if area_ha >= 5 else "MEDIUM" if area_ha >= 1 else "LOW"
 
@@ -287,7 +386,7 @@ def _ingest(run_id: str, patches: list[dict[str, Any]], actor: str) -> tuple[int
         if hit:
             rec = hit
             hist = (rec.get("history") or []) + [{"at": now(), "by": "system", "change": f"seen again in scan {run_id[:8]}"}]
-            update("fc_records", "id", rec["id"], {"seen_count": rec["seen_count"] + 1, "last_run_id": run_id, "history": hist, "updated_at": now()})
+            update("fc_records", "id", rec["id"], {"seen_count": rec["seen_count"] + 1, "last_run_id": run_id, "history": hist, **({"status": "NEEDS_REVIEW"} if rec["status"] == "SUPERSEDED" else {}), "updated_at": now()})
             log("record_linked", "pipeline", "ok", f"Patch matched existing record {rec['code']} (not duplicated)", run_id=run_id, record_id=rec["id"])
             linked += 1
             continue
@@ -396,7 +495,7 @@ def public(r: dict[str, Any], full: bool = False) -> dict[str, Any]:
     return out
 
 
-def query(start: date | None = None, end: date | None = None, bbox: list[float] | None = None, status: str | None = None, min_ha: float = 0.0, include_false: bool = False, limit: int = 1000) -> list[dict[str, Any]]:
+def query(start: date | None = None, end: date | None = None, bbox: list[float] | None = None, status: str | None = None, min_ha: float = 0.0, include_false: bool = False, limit: int = 1000, within=None) -> list[dict[str, Any]]:
     q, a = "SELECT * FROM fc_records WHERE area_ha >= ?", [min_ha]
     if start:
         q += " AND est_date >= ?"; a.append(start.isoformat())
@@ -407,9 +506,12 @@ def query(start: date | None = None, end: date | None = None, bbox: list[float] 
     if status:
         q += " AND status = ?"; a.append(status)
     elif not include_false:
-        q += " AND status != 'FALSE_POSITIVE'"
+        q += " AND status NOT IN ('FALSE_POSITIVE', 'SUPERSEDED')"
     with connection() as conn:
         rows = [_dec(decode_row(dict(r))) for r in conn.execute(q + " ORDER BY est_date DESC, area_ha DESC LIMIT ?", (*a, limit))]
+    if within is not None:
+        from shapely.geometry import Point
+        rows = [r for r in rows if within.buffer(1e-4).contains(Point(r["lon"], r["lat"]))]
     return [public(r) for r in rows]
 
 
