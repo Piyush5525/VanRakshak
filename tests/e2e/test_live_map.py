@@ -50,10 +50,8 @@ def test_live_map_marks_an_incident_adds_factory_info_and_downloads_a_report(ser
     ctx.close()
 
 
-def test_landing_leads_to_the_live_map(server, browser):  # noqa: F811
+def test_the_site_root_opens_the_live_map_directly(server, browser):  # noqa: F811
     page = browser.new_page()
     page.goto(server + "/", wait_until="load")
-    page.click("a.primary")
-    page.wait_for_url("**/live")
-    assert page.locator("#map").count() == 1
+    assert page.locator("#map").count() == 1 and page.locator("#rtabs").count() == 1
     page.close()

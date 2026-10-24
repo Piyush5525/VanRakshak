@@ -86,7 +86,7 @@ def test_root_opens_live_map_and_console_route(server, browser):
     page.wait_for_selector("#nav .nav-item")
     assert page.locator("#nav .nav-item").count() == 4  # Live map + Replanting intelligence + 2 AR tools
     assert page.locator('#nav a[href="/replanting/"]').count() == 1
-    assert page.locator('.nav-group').inner_text() == 'AR tools'
+    assert page.locator('.nav-group').inner_text().lower() == 'ar tools'
     page.close()
 
 

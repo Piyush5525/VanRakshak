@@ -1,3 +1,4 @@
+import time
 import hashlib
 import hmac
 import base64
@@ -425,8 +426,13 @@ def test_client_config_exposes_only_public_mapbox_token():
     try:
         settings.mapbox_api = "sk.secret"
         assert client.get("/api/v1/system/client-config", headers=ADMIN).json()["mapbox_public_token"] is None
+        import app.main as main_mod
+
         settings.mapbox_api = "pk.public"
+        main_mod._token_check["pk.public"] = (time.time() + 60, True)    # Mapbox accepts it
         assert client.get("/api/v1/system/client-config", headers=ADMIN).json()["mapbox_public_token"] == "pk.public"
+        main_mod._token_check["pk.public"] = (time.time() + 60, False)   # Mapbox refuses it: the map must not go blank
+        assert client.get("/api/v1/system/client-config", headers=ADMIN).json()["mapbox_public_token"] is None
     finally:
         settings.mapbox_api = saved
 

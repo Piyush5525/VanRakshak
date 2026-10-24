@@ -420,10 +420,31 @@ def authorization_web_leads(payload: dict, role: Role = Depends(require_roles(Ro
     return out
 
 
+_token_check: dict[str, tuple[float, bool]] = {}
+
+
+def _mapbox_token_ok(token: str) -> bool:
+    """Ask Mapbox once (cached for 10 minutes) whether the public token is accepted."""
+    import time as _t
+    import httpx as _h
+
+    hit = _token_check.get(token)
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    try:
+        ok = _h.get(f"https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/256/0/0/0?access_token={token}", timeout=8).status_code not in (401, 403)
+    except _h.HTTPError:
+        ok = True   # cannot tell (offline): keep the token rather than switch the map away
+    _token_check[token] = (_t.time() + 600, ok)
+    return ok
+
+
 @app.get(settings.api_prefix + "/system/client-config")
 def client_config():
     """Public, browser-safe configuration. Only a public (pk.) Mapbox token is ever returned."""
     token = settings.mapbox_api if (settings.mapbox_api or "").startswith("pk.") else None
+    if token and not _mapbox_token_ok(token):   # a refused token would blank the whole map: use the free map layers instead
+        token = None
     return {"mapbox_public_token": token, "osm_attribution": "(c) OpenStreetMap contributors"}
 
 

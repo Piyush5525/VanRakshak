@@ -6,6 +6,8 @@ permits or safety, and the response says so. If no engine is configured the resu
 import math
 from typing import Any
 
+import time
+
 import httpx
 
 from app.core.config import Settings
@@ -34,6 +36,15 @@ def nearest_station(stations: list[dict[str, Any]], destination: list[float]) ->
     return best
 
 
+_DEAD: dict[str, float] = {}   # a provider whose key was refused is skipped for a while instead of failing every request
+FOOT_URL = "https://routing.openstreetmap.de/routed-foot"   # keyless OpenStreetMap walking router (FOSSGIS)
+DRIVE_URL = "https://router.project-osrm.org"               # keyless OpenStreetMap driving router (OSRM demo)
+
+
+def _dead(name: str) -> bool:
+    return _DEAD.get(name, 0) > time.time()
+
+
 class Router:
     """Providers are tried in the order of ROUTING_PROVIDER (comma list), e.g. "mapbox,serpapi"."""
 
@@ -44,7 +55,7 @@ class Router:
     @property
     def providers(self) -> list[str]:
         wanted = [p.strip() for p in self.settings.routing_provider.split(",") if p.strip() and p.strip() != "unconfigured"]
-        ready = {"mapbox": bool(self.settings.mapbox_api), "serpapi": bool(self.settings.serp_api), "osrm": bool(self.settings.osrm_url)}
+        ready = {"mapbox": bool(self.settings.mapbox_api) and not _dead("mapbox"), "serpapi": bool(self.settings.serp_api), "osrm": bool(self.settings.osrm_url) or getattr(self.settings, "osrm_public", False)}
         if not wanted:   # nothing named (or the placeholder "unconfigured"): use whatever has a key, best first
             wanted = ["mapbox", "osrm", "serpapi"]
         return [p for p in wanted if ready.get(p)]
@@ -61,6 +72,8 @@ class Router:
         r = self.client.get(f"https://api.mapbox.com/directions/v5/mapbox/driving/{o[0]},{o[1]};{d[0]},{d[1]}", params={"alternatives": str(alternatives).lower(), "geometries": "geojson", "overview": "full", "steps": "true", "access_token": self.settings.mapbox_api})
         data = r.json()
         if data.get("code") != "Ok":
+            if r.status_code in (401, 403):
+                _DEAD["mapbox"] = time.time() + 600   # the key is refused: stop asking for ten minutes
             return {"status": "no_route", "reason": data.get("message") or data.get("code")}
         routes = []
         for x in data["routes"]:
@@ -69,7 +82,7 @@ class Router:
         return {"status": "ok", "primary": routes[0], "alternatives": routes[1:], "waypoint_snap_distance_m": [w.get("distance") for w in data.get("waypoints", [])], "provider": "mapbox"}
 
     def _osrm(self, o, d, alternatives):
-        r = self.client.get(f"{self.settings.osrm_url.rstrip('/')}/route/v1/driving/{o[0]},{o[1]};{d[0]},{d[1]}", params={"alternatives": "true" if alternatives else "false", "overview": "full", "geometries": "geojson"})
+        r = self.client.get(f"{(self.settings.osrm_url or DRIVE_URL).rstrip('/')}/route/v1/driving/{o[0]},{o[1]};{d[0]},{d[1]}", params={"alternatives": "true" if alternatives else "false", "overview": "full", "geometries": "geojson"})
         data = r.json()
         if data.get("code") != "Ok":
             return {"status": "no_route", "reason": data.get("message") or data.get("code")}
@@ -89,18 +102,24 @@ class Router:
 
     # ------------------------------------------------------------ the last stretch on foot
     def _walk_mapbox(self, o: list[float], d: list[float]) -> dict[str, Any] | None:
-        """A walking route (paths and tracks, not only roads). None if the provider has nothing usable."""
-        if not self.settings.mapbox_api:
+        """A walking route (paths and tracks, not only roads): Mapbox when its key works, else the OpenStreetMap foot router."""
+        use_mapbox = bool(self.settings.mapbox_api) and not _dead("mapbox")
+        if not use_mapbox and not getattr(self.settings, "osrm_public", False):
             return None
+        url = f"https://api.mapbox.com/directions/v5/mapbox/walking/{o[0]},{o[1]};{d[0]},{d[1]}" if use_mapbox else f"{FOOT_URL}/route/v1/foot/{o[0]},{o[1]};{d[0]},{d[1]}"
+        params = {"geometries": "geojson", "overview": "full", "steps": "true"} | ({"access_token": self.settings.mapbox_api} if use_mapbox else {})
         try:
-            r = self.client.get(f"https://api.mapbox.com/directions/v5/mapbox/walking/{o[0]},{o[1]};{d[0]},{d[1]}", params={"geometries": "geojson", "overview": "full", "steps": "true", "access_token": self.settings.mapbox_api})
+            r = self.client.get(url, params=params)
             data = r.json()
         except (httpx.HTTPError, ValueError):
             return None
+        if use_mapbox and r.status_code in (401, 403):
+            _DEAD["mapbox"] = time.time() + 600
+            return self._walk_mapbox(o, d)
         if data.get("code") != "Ok" or not data.get("routes"):
             return None
         x = data["routes"][0]
-        steps = [{"instruction": st["maneuver"].get("instruction"), "distance_m": round(st["distance"]), "location": st["maneuver"]["location"]} for leg in x.get("legs", []) for st in leg.get("steps", [])]
+        steps = [{"instruction": (st.get("maneuver") or {}).get("instruction"), "distance_m": round(st["distance"]), "location": st["maneuver"]["location"]} for leg in x.get("legs", []) for st in leg.get("steps", []) if st.get("maneuver")]
         return {"mode": "walk", "distance_km": round(x["distance"] / 1000, 2), "duration_min": round(x["duration"] / 60, 1), "geometry": x["geometry"], "steps": steps, "source": "mapped walking path", "estimated": False}
 
     def _walk_leg(self, start: list[float], dest: list[float]) -> dict[str, Any]:

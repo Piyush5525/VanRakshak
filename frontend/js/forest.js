@@ -153,11 +153,13 @@ function draw() {
       .on('click', () => { S.resp = x.id; paint(); draw(); }).addTo(S.layers.route);
   }
   const cop = list.find((x) => x.kind === 'police_station' && !x.main);
-  if (pick && cop && cop !== pick && cop.geometry) drawRoute(S.layers.route, cop, { color: '#7b1fa2' });   // the nearest police station's route is shown beside the main one
-  if (pick?.geometry || pick?.segments?.length) drawRoute(S.layers.route, pick, { color: pick.kind === 'police_station' ? '#7b1fa2' : '#0b57d0' });
+  const line = (x, color) => (hasLine(x) ? drawRoute(S.layers.route, x, { color }) : L.polyline([[x.lat, x.lon], [r.lat, r.lon]], { color, weight: 3, dashArray: '3 8', opacity: 0.9 }).bindTooltip('Straight line: no road line is available for this one').addTo(S.layers.route));
+  if (pick && cop && cop !== pick) line(cop, '#7b1fa2');   // the nearest police station's route is shown beside the main one
+  if (pick) line(pick, pick.kind === 'police_station' ? '#7b1fa2' : '#0b57d0');
 }
 
 // everyone who can respond to a spot: the main responder first, then the nearest police station, then others
+const hasLine = (x) => !!(x.geometry?.coordinates?.length || (x.segments || []).some((g) => g.geometry?.coordinates?.length));
 function responders(r) {
   const a = r.authority, rt = r.route;
   if (!a?.office) return [];
@@ -372,7 +374,7 @@ function responderSection(r) {
   const row = (x) => `<button class="resp ${x === pick ? 'on' : ''}" data-resp="${esc(x.id)}"><span class="ri">${esc(x.icon || '📍')}</span><span class="rn"><b>${esc(x.name)}</b><small>${esc(x.kind_label || '')}${x.main ? ' · main' : ''}</small></span><span class="rm">${has(x) ? `${Math.round(x.duration_min)} min<small>${x.distance_km} km${x.walk_km ? ' · 🚶' : ''}</small>` : `${x.straight_line_km} km<small>straight</small>`}</span></button>`;
   const extra = (a?.status === 'OK' && a.police?.same_as_main) ? '<div class="sub">No forest office is close, so this police station is the main responder.</div>' : '';
   return `<div class="sect"><h4>Who can respond <span class="gnote">tap to show or hide its route</span></h4><div class="resps">${list.map(row).join('')}</div>${extra}
-    ${!pick ? '' : has(pick) ? `<div class="respd">${journeyHtml(pick)}${legendHtml}<div class="sub"><a href="${esc(pick.navigation_url)}" target="_blank" rel="noopener">🚗 Directions by road</a>${pick.walk_url ? ' · ' + walkLink(pick) : ''}</div>${pick.phone ? `<div class="sub">📞 …${esc(String(pick.phone).slice(-3))}</div>` : ''}${!pick.main && pick.id ? `<button class="btn sm" data-use="${esc(pick.id)}">Make this the main responder</button>` : ''}</div>` : `<div class="sub" style="margin-top:6px">${esc(a?.reason || 'No road route could be calculated for this one.')}</div>`}</div>`;
+    ${!pick ? '' : has(pick) ? `<div class="respd">${journeyHtml(pick)}${hasLine(pick) ? '' : '<div class="sub">The map provider gave time and distance only, so the map shows a straight dashed line.</div>'}${legendHtml}<div class="sub"><a href="${esc(pick.navigation_url)}" target="_blank" rel="noopener">🚗 Directions by road</a>${pick.walk_url ? ' · ' + walkLink(pick) : ''}</div>${pick.phone ? `<div class="sub">📞 …${esc(String(pick.phone).slice(-3))}</div>` : ''}${!pick.main && pick.id ? `<button class="btn sm" data-use="${esc(pick.id)}">Make this the main responder</button>` : ''}</div>` : `<div class="sub" style="margin-top:6px">${esc(a?.reason || 'No road route could be calculated for this one.')}</div>`}</div>`;
 }
 function paintRecord(box, r) {
   const a = r.authority, rt = r.route;

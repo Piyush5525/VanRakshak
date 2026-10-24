@@ -31,6 +31,9 @@ let currentBase = bases.map.addTo(map);
 config().then((cfg) => {
   if (cfg.mapbox_public_token) {  // cleaner, English-labelled, forest-friendly base map
     const outdoors = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${cfg.mapbox_public_token}`, { maxZoom: 19, attribution: '&copy; Mapbox &copy; OpenStreetMap contributors' });
+    let bad = 0;   // if Mapbox refuses the tiles, fall back to the free OpenStreetMap layer instead of leaving a blank map
+    outdoors.on('tileerror', () => { if (++bad === 4 && currentBase === outdoors) { map.removeLayer(outdoors); bases.map = osmBase; currentBase = osmBase.addTo(map); currentBase.bringToBack(); } });
+    const osmBase = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' });
     const wasMap = currentBase === bases.map; bases.map = outdoors;
     if (wasMap) { map.removeLayer(currentBase); currentBase = outdoors.addTo(map); currentBase.bringToBack(); }
   }

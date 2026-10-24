@@ -809,6 +809,14 @@ def _n_dashboard(rec, text, plain, real, actor):
     return {"status": "SENT", "note": "Visible in the VanRakshak dashboard and activity log"}
 
 
+def _pts(rt: dict[str, Any], who: dict[str, Any], lon: float, lat: float) -> list[list[float]]:
+    """The drawable line of a route: its geometry, or the joined segments, or a straight line when the provider gave no path."""
+    if (rt.get("geometry") or {}).get("coordinates"):
+        return rt["geometry"]["coordinates"]
+    pts = [c for sg in rt.get("segments") or [] for c in ((sg.get("geometry") or {}).get("coordinates") or [])]
+    return pts or [[who["lon"], who["lat"]], [lon, lat]]
+
+
 def evidence_images(rec: dict[str, Any]) -> list[tuple[str, bytes, str]]:
     """Two pictures for the responders: the lost area on satellite imagery, and the route(s) from the forest office / police station to it.
     Returns (filename, jpeg, caption); a picture that cannot be made is left out, never replaced by a stock image."""
@@ -817,7 +825,7 @@ def evidence_images(rec: dict[str, Any]) -> list[tuple[str, bytes, str]]:
     from urllib.parse import quote
 
     from PIL import Image
-    from app.services import mapimage as mi
+    from app.services import mapimage as mi, tilemap
 
     lat, lon = rec["lat"], rec["lon"]
     a, r = rec.get("authority") or {}, rec.get("route") or {}
@@ -828,29 +836,31 @@ def evidence_images(rec: dict[str, Any]) -> list[tuple[str, bytes, str]]:
     head = [(f"VanRakshak  {rec['code']}  {rec['area_ha']} ha of tree cover lost", (255, 255, 255)), (f"{lat:.5f}, {lon:.5f} · about {rec['est_date']} · red = area lost", (255, 210, 120))]
     try:
         png = mi._mapbox(ov)
-        if png:
-            out.append((f"{rec['code']}-site.jpg", mi._banner(Image.open(io.BytesIO(png)), head, "Satellite basemap: Mapbox, Maxar · candidate change, verify on the ground"), f"📍 {rec['code']} · the area where trees were lost (red). Coordinates {lat:.5f}, {lon:.5f}"))
+        base, credit = (Image.open(io.BytesIO(png)), "Satellite basemap: Mapbox, Maxar") if png else (tilemap.render([(lon - 0.004, lat - 0.003), (lon + 0.004, lat + 0.003)] + [tuple(c) for c in (ring or [])], [ring] if ring else [], [], [(lon, lat, "#d9382a")]), "Satellite basemap: Esri, Maxar")
+        if base is not None:
+            out.append((f"{rec['code']}-site.jpg", mi._banner(base, head, credit + " · candidate change, verify on the ground"), f"📍 {rec['code']} · the area where trees were lost (red). Coordinates {lat:.5f}, {lon:.5f}"))
     except Exception as exc:  # noqa: BLE001
         log("telegram_image_failed", "telegram", "failed", f"Site picture not made: {type(exc).__name__}", record_id=rec["id"])
     o, po = a.get("office"), a.get("police")
     legs = []
-    if o and r.get("status") == "OK" and r.get("geometry"):
+    if o and r.get("status") == "OK":
         legs.append((o, r, "14573c", "park" if o.get("kind") != "police_station" else "police"))
-    if po and po.get("geometry"):
+    if po and po.get("distance_km") is not None:
         legs.append((po, po, "7b1fa2", "police"))
     if legs:
         ov, lines2 = [], []
         for who, rt, col, icon in legs:
-            ov.append(f"path-5+{col}-0.9({quote(mi._poly5(mi._thin(rt['geometry']['coordinates'], 150)), safe='')})")
+            ov.append(f"path-5+{col}-0.9({quote(mi._poly5(mi._thin(_pts(rt, who, lon, lat), 150)), safe='')})")
         for who, rt, col, icon in legs:
             ov.append(f"pin-l-{icon}+{col}({who['lon']},{who['lat']})")
             lines2.append((f"{who.get('kind_label', 'Responder')} · {who['name'][:34]}: {rt['distance_km']} km, ~{round(rt['duration_min'])} min", (190, 235, 205) if col == "14573c" else (225, 190, 245)))
         ov.append(site)
         try:
             png = mi._mapbox(ov)
-            if png:
+            base = Image.open(io.BytesIO(png)) if png else tilemap.render([(lon, lat)] + [(who["lon"], who["lat"]) for who, *_ in legs], [], [(([who["lon"], who["lat"]], [lon, lat]) if False else (_pts(rt, who, lon, lat), "#" + col)) for who, rt, col, _i in legs], [(who["lon"], who["lat"], "#" + col) for who, rt, col, _i in legs] + [(lon, lat, "#d9382a")])
+            if base is not None:
                 cap = "🚗 Routes to the site: " + " · ".join(f"{who.get('kind_label', 'Responder')} {rt['distance_km']} km / {round(rt['duration_min'])} min" for who, rt, _, _ in legs)
-                out.append((f"{rec['code']}-routes.jpg", mi._banner(Image.open(io.BytesIO(png)), [(f"Routes to {rec['code']}", (255, 255, 255))] + lines2, "Typical road time, not live traffic · responder details unverified"), cap))
+                out.append((f"{rec['code']}-routes.jpg", mi._banner(base, [(f"Routes to {rec['code']}", (255, 255, 255))] + lines2, "Typical road time, not live traffic · responder details unverified"), cap))
         except Exception as exc:  # noqa: BLE001
             log("telegram_image_failed", "telegram", "failed", f"Route picture not made: {type(exc).__name__}", record_id=rec["id"])
     return out

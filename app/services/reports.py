@@ -181,12 +181,27 @@ def _static_map(lat: float, lon: float, zoom: int = 15, w: int = 640, h: int = 3
 
     token = get_settings().mapbox_api
     if not token:
-        return None
+        return _esri_map(lat, lon, zoom)
     try:
         r = httpx.get(f"https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/pin-l+d7263d({lon},{lat})/{lon},{lat},{zoom},0/{w}x{h}@2x?access_token={token}", timeout=30)
-        return r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image") else None
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+            return r.content
     except httpx.HTTPError:
+        pass
+    return _esri_map(lat, lon, zoom)
+
+
+def _esri_map(lat: float, lon: float, zoom: int) -> bytes | None:
+    """Free satellite tiles with a pin, for when the Mapbox key is missing or refused."""
+    from app.services import tilemap
+
+    span = 0.01 * 2 ** (15 - zoom)
+    img = tilemap.render([(lon - span, lat - span * 0.6), (lon + span, lat + span * 0.6)], [], [], [(lon, lat, "#d9382a")], (1280, 680))
+    if img is None:
         return None
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=85)
+    return out.getvalue()
 
 
 def generic_pdf(title: str, subtitle: str, blocks: list[tuple[str, Any]], summary: list[tuple[str, str]] | None = None, links: list[tuple[str, str]] | None = None, image: bytes | None = None, caption: str | None = None, images: list[tuple[bytes, str]] | None = None) -> bytes:
