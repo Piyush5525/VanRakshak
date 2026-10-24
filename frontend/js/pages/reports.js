@@ -1,0 +1,20 @@
+import { api, html, raw, esc, fmt, tag, empty, toast, can, download, $, $$ } from '../core.js';
+
+export async function render(root) {
+  const [reports, incidents, envs, projs, sites, regions] = await Promise.all([api('/reports').catch(() => []), api('/incidents'), api('/environment/assessments'), api('/forest/projections'), api('/industrial/sites'), api('/regions')]);
+  const rname = Object.fromEntries(regions.map((r) => [r.id, r.name]));
+  root.innerHTML = html`
+    <div class="note-box">Every report separates observations, model inferences, forecasts/projections, simulations, official records and human decisions, and states its limitations. Reports are decision support, not legal findings. Downloads are logged.</div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="panel"><div class="row"><div class="grow"><h3>Incident evidence packages</h3><p class="sub">PDF with before/after imagery plus a machine-readable JSON package with a SHA-256.</p></div></div>
+        ${incidents.length ? raw(`<table class="t"><tbody>${incidents.map((i) => { const rs = reports.filter((r) => r.incident_id === i.id); return `<tr><td><b>${esc(i.title)}</b><div class="help">${esc(fmt.status(i.status))}${rs.length ? ' · ' + rs.length / 2 + ' generated' : ''}</div></td><td class="row"><button class="button subtle sm" data-gen="${esc(i.id)}">Generate</button>${rs.slice(0, 2).map((r) => `<button class="button subtle sm" data-dl="${esc(r.id)}" data-f="${esc(r.format)}">${esc(r.format.toUpperCase())}</button>`).join('')}</td></tr>`; }).join('')}</tbody></table>`) : empty('No incidents', 'Reports are generated per incident.', '▤')}</div>
+      <div class="panel"><h3>Environmental assessments</h3><p class="sub">Generate new ones from Environmental Impact.</p>${envs.length ? raw(`<table class="t"><tbody>${envs.map((e) => `<tr><td><b>${esc(e.region_name)}</b><div class="help">${esc(fmt.dt(e.created_at))} · ${esc(fmt.status(e.status))}</div></td><td class="row"><button class="button subtle sm" data-env="${esc(e.id)}" data-f="pdf">PDF</button><button class="button subtle sm" data-env="${esc(e.id)}" data-f="csv">CSV</button></td></tr>`).join('')}</tbody></table>`) : empty('None yet', '', '❦')}</div>
+      <div class="panel"><h3>Forest projections</h3>${projs.length ? raw(`<table class="t"><tbody>${projs.map((p) => `<tr><td><b>${esc(rname[p.region_id] || p.region_id.slice(0, 8))}</b><div class="help">${esc(fmt.dt(p.created_at))} · ${esc(p.status)}</div></td><td>${p.status === 'OK' ? `<button class="button subtle sm" data-pj="${esc(p.id)}">PDF</button>` : ''}</td></tr>`).join('')}</tbody></table>`) : empty('None yet', 'Compute one on Forest Forecasts.', '⟿')}</div>
+      <div class="panel"><h3>Industrial site assessments</h3>${sites.filter((s) => s.result).length ? raw(`<table class="t"><tbody>${sites.filter((s) => s.result).map((s) => `<tr><td><b>${esc(s.name)}</b><div class="help">${esc(fmt.status(s.status))}</div></td><td><button class="button subtle sm" data-site="${esc(s.id)}">PDF</button></td></tr>`).join('')}</tbody></table>`) : empty('None yet', 'Assess a site on Industrial Development.', '▥')}</div>
+    </div>`;
+  $$('[data-dl]').forEach((b) => (b.onclick = () => download(`/reports/${b.dataset.dl}/download`, `rakshak-report.${b.dataset.f}`)));
+  $$('[data-gen]').forEach((b) => (b.onclick = async () => { b.disabled = true; try { await api(`/incidents/${b.dataset.gen}/reports`, { method: 'POST' }); toast('Report generated'); location.reload(); } catch (e) { toast(e.message, 'error'); b.disabled = false; } }));
+  $$('[data-env]').forEach((b) => (b.onclick = () => download(`/environment/assessments/${b.dataset.env}/report.${b.dataset.f}`, `rakshak-environment.${b.dataset.f}`)));
+  $$('[data-pj]').forEach((b) => (b.onclick = () => download(`/forest/projections/${b.dataset.pj}/report.pdf`, 'rakshak-projection.pdf')));
+  $$('[data-site]').forEach((b) => (b.onclick = () => download(`/industrial/sites/${b.dataset.site}/report.pdf`, 'rakshak-site.pdf')));
+}

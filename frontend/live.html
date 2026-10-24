@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VanRakshak · Live map</title>
+  <link rel="icon" href="/assets/public/logo.svg" type="image/svg+xml">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <link rel="stylesheet" href="/assets/live.css" />
+</head>
+<body>
+  <div id="map" role="application" aria-label="Live map of India"></div>
+
+  <header class="brand card" aria-label="VanRakshak">
+    <img src="/assets/public/logo.svg" alt="VanRakshak logo"><div><strong>VanRakshak</strong><span>Live forest map</span></div>
+  </header>
+
+  <div class="views card" id="views" role="group" aria-label="Map view"><button data-v="map" class="on">Map</button><button data-v="sat">Satellite</button><button data-v="terrain">Terrain</button></div>
+
+  <aside class="side left card" id="left" aria-label="Map layers">
+    <button class="collapse" data-for="left" aria-label="Hide panel">‹</button>
+    <div class="side-head"><div><h2>Map layers</h2><div class="sub">Everything is off until you turn it on</div></div></div>
+    <label class="layer"><input type="checkbox" id="showFires"><span><b>🔥 NASA fire hotspots</b><small>Dots where satellites see heat</small></span></label>
+    <label class="layer"><input type="checkbox" id="showHeat"><span><b>🌡 Heat zones</b><small>Where hotspots cluster</small></span></label>
+    <label class="layer"><input type="checkbox" id="showCover"><span><b>🌲 Tree cover history</b><small>Areas you have checked, 90 days → today</small></span></label>
+    <div id="fireInfo" hidden>
+      <div class="big"><b id="fireCount">–</b><span id="fireLabel">hotspots</span></div>
+      <div class="sub" id="fireSub"></div>
+      <div class="pills" id="range"><button data-d="1" class="on">24 h</button><button data-d="2">48 h</button><button data-d="3">72 h</button></div>
+      <div class="legend"><span><i style="background:#e5252a"></i>under 6 h</span><span><i style="background:#f08a1f"></i>6–24 h</span><span><i style="background:#f4cf3d"></i>older</span></div>
+      <div class="row2"><button class="btn sm" id="refresh">↻ Refresh</button></div>
+      <h3>Strongest</h3>
+      <div id="fireList" class="list"></div>
+      <p class="fine" id="fireNote"></p>
+      <details><summary>Sensor</summary><label class="f">Satellite sensor<select id="src"><option value="VIIRS_SNPP_NRT">VIIRS Suomi-NPP (375 m)</option><option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20 (375 m)</option><option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21 (375 m)</option><option value="MODIS_NRT">MODIS (1 km)</option></select></label></details>
+    </div>
+  </aside>
+
+  <aside class="side right card" id="right" aria-label="Incidents">
+    <button class="collapse" data-for="right" aria-label="Hide panel">›</button>
+    <div class="tabs2" id="rtabs" role="tablist"><button data-t="tree" class="on" role="tab">🌲 Trees</button><button data-t="fire" role="tab">🔥 Fire</button><button data-t="inc" role="tab">📍 Reports</button></div>
+    <div id="forestBody"></div><div id="rightBody" hidden></div><div id="fireBody" hidden></div>
+  </aside>
+
+  <button class="tab tab-left" data-for="left" aria-label="Show layers panel">☰ Layers</button>
+  <button class="tab tab-right" data-for="right" aria-label="Show incidents panel">⚠ Incidents</button>
+  <div class="hint card" id="hint" hidden></div>
+  <a class="console card" href="/app">Full console →</a>
+  <div id="toast" class="toast" role="status"></div>
+  <div id="modal" class="modal" hidden><div class="sheet card" id="sheet"></div></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script type="module" src="/assets/js/live.js"></script>
+</body>
+</html>

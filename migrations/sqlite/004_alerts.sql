@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS alert_runs (id TEXT PRIMARY KEY, region_id TEXT NOT NULL, year INTEGER NOT NULL, status TEXT NOT NULL, progress REAL NOT NULL, params TEXT NOT NULL, held_out INTEGER NOT NULL DEFAULT 0, result TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS alerts (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, region_id TEXT NOT NULL, issue_month TEXT NOT NULL, est_date TEXT NOT NULL, date_uncertainty_days REAL, issue_date TEXT NOT NULL, area_ha REAL NOT NULL, evidence TEXT NOT NULL, geometry TEXT NOT NULL, score REAL NOT NULL, rank INTEGER NOT NULL, monsoon INTEGER NOT NULL, details TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS alert_evaluations (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_alerts_run ON alerts(run_id, issue_month);

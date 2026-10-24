@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VanRakshak">
+  <path d="M32 3 56 12v20c0 14-10 24-24 29C18 56 8 46 8 32V12Z" fill="#14573c"/>
+  <path d="M32 3 56 12v20c0 14-10 24-24 29" fill="none" stroke="#0e3d2a" stroke-width="2"/>
+  <path d="M32 14c-9 7-11 17-4 25 2 2 4 4 4 9 0-5 2-7 4-9 7-8 5-18-4-25Z" fill="#b9edcd"/>
+  <path d="M32 48V27M32 36l-6-5M32 32l6-5" stroke="#14573c" stroke-width="2" stroke-linecap="round" fill="none"/>
+</svg>

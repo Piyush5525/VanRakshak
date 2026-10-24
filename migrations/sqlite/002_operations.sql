@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS stations (id TEXT PRIMARY KEY, name TEXT NOT NULL, jurisdiction TEXT NOT NULL, location TEXT NOT NULL, coverage TEXT, contacts TEXT NOT NULL, availability_note TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, provider TEXT NOT NULL, collection TEXT NOT NULL, scene_id TEXT NOT NULL, acquired_at TEXT NOT NULL, bbox TEXT NOT NULL, properties TEXT NOT NULL, retrieved_at TEXT NOT NULL, UNIQUE(provider, collection, scene_id));
+CREATE TABLE IF NOT EXISTS model_registry (id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, horizon_days INTEGER, artifact_path TEXT NOT NULL, checksum TEXT NOT NULL, training TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evaluations (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, horizon_days INTEGER, protocol TEXT NOT NULL, metrics TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS forecast_layers (id TEXT PRIMARY KEY, forecast_id TEXT NOT NULL, cells TEXT NOT NULL, created_at TEXT NOT NULL);
+ALTER TABLE notifications ADD COLUMN idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_notifications_idem ON notifications(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_wildfire_dedupe ON wildfire_observations(source, observed_at, geometry);
+CREATE INDEX IF NOT EXISTS ix_changes_region ON changes(region_id);
+CREATE INDEX IF NOT EXISTS ix_observations_region ON observations(region_id);

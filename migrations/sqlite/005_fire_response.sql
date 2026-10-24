@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS fire_incidents (id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, source TEXT NOT NULL, source_detection_id TEXT, dedupe_key TEXT UNIQUE NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, observed_at TEXT, detection TEXT, verification TEXT, forecast TEXT, impact TEXT, station TEXT, route TEXT, notify TEXT, ivr TEXT, field_updates TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT);
+CREATE TABLE IF NOT EXISTS fire_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, incident_id TEXT, event_type TEXT NOT NULL, service TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, ref TEXT, error TEXT, correlation_id TEXT, is_demo INTEGER NOT NULL DEFAULT 0, details TEXT);
+CREATE INDEX IF NOT EXISTS ix_fire_events_inc ON fire_events(incident_id, id);
+CREATE INDEX IF NOT EXISTS ix_fire_events_ts ON fire_events(id);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+ALTER TABLE stations ADD COLUMN kind TEXT;
+ALTER TABLE stations ADD COLUMN source TEXT;
+ALTER TABLE stations ADD COLUMN verified INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE stations ADD COLUMN external_ref TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stations_ext ON stations(source, external_ref) WHERE external_ref IS NOT NULL;

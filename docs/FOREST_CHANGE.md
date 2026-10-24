@@ -1,0 +1,27 @@
+# Tree-loss watch (illegal-cutting detection and reporting)
+
+Open `/live`. The **🌲 Tree loss** tab is the front door.
+
+1. **Pick a time**: 7 / 30 / 90 days or a custom range. This filters the spots listed and drawn.
+2. **Pick an area**: move and zoom the map. The dashed green box (at most 60 km²) is what will be read from the satellites.
+3. **Check this area**: reads real Sentinel-2 (optical) and Sentinel-1 (radar) images from Microsoft Planetary Computer, runs the CL-01 change engine (`alerts.detect`: seasonal baseline, two-observation confirmation, optical + radar fusion) and stores the result.
+4. **See how it changed**: buttons / slider / ▶ Play step through **90 days ago → 30 days ago → 7 days ago → today**. Green polygons are tree cover at that moment, red polygons are trees lost up to then, and a dashed line shows the cover as it was 90 days ago, so shrinking is visible directly. Every scan reaches back 90 days so this history always exists for the scanned area. Several scans build up a picture of a larger region (a repeated scan of the same box replaces its older picture; spots seen again are linked, not duplicated).
+5. **Click a spot** (polygon, marker or list row):
+   * **Is there a permit?** Five plain classes: a valid matching record; a record that overlaps but does not clearly cover it; an expired/revoked/out-of-date record; **no record found in this system**; evidence too weak. Records come from the `authorizations` table. **No record found never means "illegal"**: the screen says so, and as of writing no permit records are loaded, so every spot reads "no record found".
+   * **What is it?** Change the cause, mark it *Real loss* / *Needs a visit* / *Not a loss* (dismissed spots leave the map), add notes. Every change is kept in the record's history and the audit log.
+   * **Who should go, and how?** Finds the nearest forest offices (Google Maps via SerpAPI first, OpenStreetMap only if none is known nearby), compares the 3 closest by **road** time with Mapbox (SerpAPI fallback) and draws the route. Offices are unverified public map data.
+   * **Send an alert** (only after a person marks it Real loss / Needs a visit, and only for officer/admin roles): Telegram, phone call, e-mail, dashboard. *Practice* mode builds the message and shows it without sending. *Send for real* needs a ticked confirmation. Results (and retries, up to 3 attempts) appear immediately under the button, and a short *What just happened* list for that spot sits below, so there is no separate event-log screen.
+   * Status becomes **Reported** only when a real send is accepted by the provider. "Sent" means the provider accepted it, not that anyone read it.
+
+## API (`/api/v1/forest-change`)
+`GET /status` · `POST /runs` · `GET /runs`, `/runs/{id}` · `GET /timeline` · `GET /records` · `GET|PATCH /records/{id}` · `POST /records/{id}/verify|authority|notify` · `GET /events` · `GET /coverage` · `GET /export.geojson`. Logs in `fc_events` are redacted (tokens, API keys in URLs, phone numbers, e-mail addresses).
+
+## What is real and what is not
+* **Real:** the satellite scan, polygons, loss dates (with ± uncertainty), forest-office lookup, Mapbox road routes. A scan of 43 km² near Wayanad (Kerala) on 24 Oct 2026 read 84 optical and 39 radar dates, found 15 candidate loss patches totalling 8.5 ha (0.2 % of 4,276 ha of forest), and a repeated scan matched all 15 to the existing records.
+* **Not validated:** no ground-truth accuracy has been measured for these live scans; the engine's behaviour on held-out data is in `docs/MONTHLY_ALERTS.md`. Results are candidates from imagery, not legal findings.
+* **Limits:** 30 m pixels (patches under about 0.2 ha are dropped); loss needs two consecutive clear observations, so a 7-day view often shows little and the monsoon hides much of the land; the "forest" mask is estimated from optical greenness, not an official forest map; a scan takes a few minutes the first time (cached afterwards); at most 60 km² per scan.
+* **Telegram / phone / e-mail:** implemented and gated. Only simulated sends were exercised. Telegram is configured but nothing real has been sent; e-mail needs `SMTP_HOST`, `SMTP_FROM`, `FOREST_ALERT_EMAIL_TO`; real calls need Twilio and an approved number. Dimension IVR is not available (no API contract).
+
+## Draw your own area, and case studies
+* **Check a new area** lets you draw a rectangle or any shape anywhere in India. Up to 60 km² is read at 30 m; up to 240 km² at 60 m; larger is refused. Results are clipped to your shape; the 90-day history, loss polygons, office, route and alerts work as for any scan.
+* **Reports → Case studies** are three worked examples (steel plant cut into a forest, cement unit beside a reserve buffer, factory at the Ghats foothills). Stages Before / Clearing / Building / Running redraw the forest, cleared land, road, factory, chimneys, smoke zones, edge zone, animal corridor and waste-water path, with computed numbers (forest left, edge-affected land, forest pieces, carbon). The shapes are illustrative and the cases are not records of real companies; edge distance, carbon density and smoke zones are stated assumptions, not measurements.

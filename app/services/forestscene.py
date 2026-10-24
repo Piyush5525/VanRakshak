@@ -1,0 +1,87 @@
+"""3D / AR forest scene for a monitored region.
+
+Real inputs: Copernicus DEM heights, ESA WorldCover tree-cover fraction, stored candidate-loss polygons
+(by detection date), optional spatial risk layer and user-drawn hypothetical clearings.
+Not real: individual tree positions. The client scatters trees pseudo-randomly in proportion to the
+density grid, and the response says so.
+"""
+import json
+from datetime import datetime
+from typing import Any
+
+import numpy as np
+from pyproj import Transformer
+from rasterio.features import rasterize
+from shapely.ops import transform as shp_transform
+
+from app.core.geometry import geodesic_area_hectares, to_shape
+from app.db.database import get_one, list_rows
+from app.services.acquisition import provider
+from app.services.satellite import ProviderError
+from app.services.terrain import elevation_grid, mesh_payload
+
+
+def _mask(geometry: dict[str, Any], grid, to_utm) -> np.ndarray:
+    return rasterize([(shp_transform(to_utm.transform, to_shape(geometry)), 1)], out_shape=(grid.height, grid.width), transform=grid.transform, fill=0, all_touched=False).astype(bool)
+
+
+def build(region_id: str, max_dim: int = 80) -> dict[str, Any]:
+    region = get_one("regions", "id", region_id)
+    if not region:
+        raise ValueError("Monitoring region not found")
+    mesh = mesh_payload(region["geometry"], max_dim=max_dim, margin_deg=0.005)
+    dem = elevation_grid(region["geometry"], max_dim=max_dim, margin_deg=0.005)
+    grid = dem["grid"]
+    to_utm = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
+    notes: list[str] = []
+
+    inside = _mask(region["geometry"], grid, to_utm)
+    try:
+        box = {"type": "Polygon", "coordinates": [list(to_shape(region["geometry"]).envelope.exterior.coords)]}
+        tree = provider().worldcover_tree_fraction(box, grid)
+        density = np.where(inside, tree, 0.0)
+        density_source = "ESA WorldCover 2021 tree-cover fraction (reference map, not current)"
+    except ProviderError as exc:
+        density, density_source = np.zeros((grid.height, grid.width)), None
+        notes.append(f"Tree density unavailable: {exc}")
+
+    frames = [{"id": "reference", "label": "Reference forest (WorldCover 2021)", "date": "2021-12-31", "claim_type": "reference_map", "newly_cleared_cells": [], "cumulative_loss_hectares": 0.0}]
+    cumulative = np.zeros((grid.height, grid.width), dtype=bool)
+    cum_geoms = []
+    changes = list_rows("changes", "WHERE region_id = ? AND disturbance_type = 'CANDIDATE_FOREST_LOSS'", (region_id,), limit=100)
+    for ch in sorted(changes, key=lambda c: c["comparison_date"]):
+        m = _mask(ch["geometry"], grid, to_utm) & inside
+        new = m & ~cumulative
+        cumulative |= m
+        cum_geoms.append(to_shape(ch["geometry"]))
+        frames.append({"id": ch["id"], "label": f"Candidate loss detected {ch['comparison_date'][:10]}", "date": ch["comparison_date"][:10], "baseline_date": ch["baseline_date"][:10], "claim_type": "candidate_inference", "newly_cleared_cells": np.flatnonzero(new.ravel()).tolist(), "cumulative_loss_hectares": round(float(ch["area_hectares"]), 3), "evidence": {"change_id": ch["id"], "status": ch["status"]}})
+    if len(changes) == 0:
+        notes.append("No detected change stored for this region; the scene shows the reference forest only")
+
+    hypo = []
+    for sim in list_rows("simulations", "WHERE region_id = ?", (region_id,), limit=20):
+        m = _mask(sim["geometry"], grid, to_utm) & inside
+        hypo.append({"id": sim["id"], "label": f"Hypothetical clearing ({sim['horizon_days']} d)", "claim_type": "hypothetical_assumption", "cells": np.flatnonzero(m.ravel()).tolist(), "area_hectares": round(geodesic_area_hectares(sim["geometry"]), 3)})
+
+    risk = None
+    fc = list_rows("forecasts", "WHERE region_id = ? AND status = 'OK'", (region_id,), limit=1)
+    if fc:
+        layers = list_rows("forecast_layers", "WHERE forecast_id = ?", (fc[0]["id"],), limit=1)
+        if layers:
+            cells = []
+            for c in layers[0]["cells"]:
+                x, y = to_utm.transform(c["lon"], c["lat"])
+                col, row = ~grid.transform * (x, y)
+                if 0 <= int(col) < grid.width and 0 <= int(row) < grid.height:
+                    cells.append({"index": int(row) * grid.width + int(col), "risk": c["risk"]})
+            risk = {"claim_type": "forecast_estimate", "horizon_days": fc[0]["horizon_days"], "origin": fc[0]["origin"], "cells": cells, "model_id": fc[0]["provenance"].get("model_id")}
+
+    proj = list_rows("projections", "WHERE region_id = ? AND status = 'OK'", (region_id,), limit=1)
+    return {
+        "schema": "rakshak-forest-scene/1", "region": {"id": region["id"], "name": region["name"]},
+        "terrain": mesh, "grid": {"width": grid.width, "height": grid.height, "cell_size_m": grid.resolution},
+        "tree_density": {"values": np.round(density, 2).ravel().tolist(), "source": density_source, "placement": "SIMULATED: individual tree positions are generated by the client in proportion to this density; they are not surveyed trees"},
+        "timeline": frames, "hypothetical_scenarios": hypo, "forecast_risk": risk, "projection": ({"claim_type": "projection_from_historical_rate", "id": proj[0]["id"], "by_scenario": proj[0]["result"]["projections"]} if proj else None),
+        "labels": {"observed": "Terrain heights (Copernicus DEM)", "reference": "Tree density (WorldCover 2021)", "inferred": "Candidate loss frames (rule-based detector, unverified)", "forecast": "Spatial risk layer, only if a validated model exists", "hypothetical": "User-drawn clearings and scenario multipliers"},
+        "notes": notes, "attribution": "Contains modified Copernicus data; ESA WorldCover (CC BY 4.0); Microsoft Planetary Computer",
+    }
