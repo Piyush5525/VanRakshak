@@ -76,8 +76,13 @@ def dial(script: str, context: dict[str, Any], client: httpx.Client | None = Non
     return out
 
 
-def remote_status(provider: str, call_id: str, client: httpx.Client | None = None) -> str | None:
-    """The provider's own view of a call, normalised (RINGING / ANSWERED / COMPLETED / BUSY / NO_ANSWER / FAILED), or None if unknown."""
+def _req_id(v: Any) -> str:
+    return str(v.get("id")) if isinstance(v, dict) else str(v)
+
+
+def remote_detail(provider: str, call_id: str, client: httpx.Client | None = None) -> dict[str, Any] | None:
+    """The provider's own view of a call: {status, duration_s, hangup}. Status is normalised (RINGING / ANSWERED / COMPLETED /
+    BUSY / NO_ANSWER / FAILED); None if the provider does not know the call yet."""
     c = client or httpx.Client(timeout=20)
     try:
         if provider == "omnidimension":
@@ -87,14 +92,30 @@ def remote_status(provider: str, call_id: str, client: httpx.Client | None = Non
             body = r.json()
             rows = body.get("call_log_data") or body.get("data") or body.get("calls") or (body if isinstance(body, list) else [])
             for row in rows:
-                if str(row.get("call_request_id", row.get("requestId", ""))) == str(call_id):
+                if _req_id(row.get("call_request_id", row.get("requestId", ""))) == str(call_id):
                     raw = str(row.get("call_status") or row.get("status") or "").lower()
-                    return OMNI_STATUS.get(raw) or ("COMPLETED" if row.get("call_end_time") or row.get("duration") else None)
+                    dur = row.get("call_duration_in_seconds")
+                    try:
+                        dur = round(float(dur))
+                    except (TypeError, ValueError):
+                        dur = None
+                    st = OMNI_STATUS.get(raw) or ("COMPLETED" if row.get("call_end_time") or dur else None)
+                    if st == "COMPLETED" and (dur is not None and dur < 3):
+                        st = "NO_ANSWER"   # connected for under three seconds: nobody listened
+                    return {"status": st, "duration_s": dur, "hangup": row.get("hangup_reason")}
             return None
         r = c.get(f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Calls/{call_id}.json", auth=(settings.twilio_account_sid, settings.twilio_auth_token))
-        return TWILIO_MAP.get(r.json().get("status")) if r.status_code == 200 else None
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        return {"status": TWILIO_MAP.get(j.get("status")), "duration_s": int(j["duration"]) if j.get("duration") else None, "hangup": None}
     except (httpx.HTTPError, ValueError):
         return None
+
+
+def remote_status(provider: str, call_id: str, client: httpx.Client | None = None) -> str | None:
+    d = remote_detail(provider, call_id, client)
+    return d["status"] if d else None
 
 
 def mask(n: str | None) -> str:
@@ -115,8 +136,16 @@ def _num(v: float, places: int = 3) -> str:
     return f"{v:.{places}f}"
 
 
+def _ago(det: dict[str, Any]) -> str | None:
+    try:
+        hrs = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(str(det["observed_at"]).replace("Z", "+00:00"))).total_seconds() / 3600)
+    except (KeyError, ValueError, TypeError):
+        return None
+    return "just now" if hrs < 0.5 else "about an hour ago" if hrs < 1.5 else f"{round(hrs)} hours ago"
+
+
 def spoken(inc: dict[str, Any]) -> str:
-    """The call script: where, what, how big, how it may spread, who is near, and how far the nearest station is."""
+    """The call script, written to be heard: the urgent facts first, short sentences, location and code last."""
     from app.services import geoinfo
 
     det, r, fc, imp = inc.get("detection") or {}, inc.get("route") or {}, inc.get("forecast") or {}, inc.get("impact") or {}
@@ -125,36 +154,24 @@ def spoken(inc: dict[str, Any]) -> str:
         det["place"] = pl
         fireops.patch(inc["id"], detection=det)
     lat, lon = inc["lat"], inc["lon"]
-    parts = ["VanRakshak fire alert."]
-    if inc["is_demo"]:
-        parts.append("This is a test scenario.")
-    where = f"near {pl['name']}" if pl else "in a forest area"
-    parts.append(f"Incident {inc['code'].replace('-', ' ')}. A forest fire has been detected {where}.")
-    parts.append(f"Location: {_num(abs(lat))} degrees {'north' if lat >= 0 else 'south'}, {_num(abs(lon))} degrees {'east' if lon >= 0 else 'west'}.")
-    if det.get("observed_at"):
-        try:
-            hrs = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(str(det["observed_at"]).replace("Z", "+00:00"))).total_seconds() / 3600)
-            parts.append("Detected by satellite " + ("just now" if hrs < 0.5 else f"{round(hrs)} hours ago" if hrs >= 1.5 else "about an hour ago") + (f", fire power {round(det['frp_mw'])} megawatts." if det.get("frp_mw") else "."))
-        except ValueError:
-            pass
-    status = inc.get("status")
-    parts.append("The fire has been confirmed by the control room." if status in ("CONFIRMED", "DISPATCH_REQUESTED", "DISPATCHED", "MONITORING") else "The fire is awaiting confirmation.")
+    confirmed = inc.get("status") in ("CONFIRMED", "DISPATCH_REQUESTED", "DISPATCHED", "MONITORING")
+    parts = ["Hello. This is a VanRakshak fire alert. Please listen carefully."]
+    when = _ago(det)
+    parts.append(f"A forest fire has been detected {'near ' + pl['name'] if pl else 'in a forest area'}.")
+    parts.append(("Satellites spotted it " + when + (", and the control room has confirmed it." if confirmed else ". It is still being confirmed.")) if when else ("The control room has confirmed it." if confirmed else "It is still being confirmed."))
     hz = (fc.get("horizons") or {}).get("12")
     if hz and hz.get("area_ha", {}).get("p50") is not None:
         w = ((fc.get("inputs") or {}).get("horizon_weather") or {}).get("12") or {}
-        wind = f" Wind is about {round(w['wind_kmh'])} kilometres per hour from the {geoinfo.compass(w['wind_from_deg'])}." if w.get("wind_kmh") is not None and w.get("wind_from_deg") is not None else ""
-        parts.append(f"The model estimates it could reach about {round(hz['area_ha']['p50'])} hectares within twelve hours.{wind}")
-    near = [p for p in (imp.get("places") or {}).get("settlements", [])[:3] if p.get("name")]
+        wind = f", with wind from the {geoinfo.compass(w['wind_from_deg'])}" if w.get("wind_from_deg") is not None else ""
+        parts.append(f"In twelve hours it could spread to about {round(hz['area_ha']['p50'])} hectares{wind}.")
+    near = [p for p in (imp.get("places") or {}).get("settlements", [])[:2] if p.get("name")]
     if near:
-        parts.append("Nearby settlements: " + ", ".join(f"{p['name']} about {round(p['distance_km'])} kilometres away" for p in near) + ".")
+        parts.append("Villages close by: " + ", ".join(f"{p['name']}, {round(p['distance_km'])} kilometres away" for p in near) + ".")
     if r.get("status") == "OK":
         st = r["station"]
-        d = geoinfo.direction_from(lat, lon, st["lat"], st["lon"])
-        parts.append(f"The nearest fire station is {st['name']}, {round(r['distance_km'])} kilometres to the {d} of the fire, about {geoinfo.say_minutes(r['duration_min'])} by road.")
-        first = next((x for x in (r.get("steps") or []) if x.get("instruction")), None)
-        if first:
-            parts.append(f"From the station: {first['instruction'].rstrip('.')}.")
-    parts.append("Please verify and respond. Full details are in the VanRakshak application and your Telegram message.")
+        parts.append(f"The nearest fire station is {st['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, st['lat'], st['lon'])} of the fire, about {geoinfo.say_minutes(r['duration_min'])} by road.")
+    parts.append(f"The location is {_num(abs(lat))} degrees {'north' if lat >= 0 else 'south'}, {_num(abs(lon))} degrees {'east' if lon >= 0 else 'west'}. The incident code is {inc['code'].replace('-', ' ')}.")
+    parts.append("Details and the route are in the VanRakshak app and on Telegram. Please respond now.")
     return " ".join(parts)
 
 
@@ -224,12 +241,30 @@ def _simulate(incident_id: str, e: dict[str, Any], demo: bool) -> None:
         _set(incident_id, e, s, demo, msg, "info")
 
 
+def refresh_calls(incident_id: str) -> None:
+    """A call that was placed before a restart is no longer followed by its background thread: ask the provider once, on demand."""
+    inc = fireops.get(incident_id)
+    for e in ((inc or {}).get("ivr") or {}).get("calls", []):
+        if e.get("simulated") or e["status"] in FINAL or not e.get("provider_call_id"):
+            continue
+        d = remote_detail(e["provider"], e["provider_call_id"])
+        if d and d["status"] and d["status"] != e["status"]:
+            if d.get("duration_s") is not None:
+                e["duration_s"] = d["duration_s"]
+            _set(incident_id, e, d["status"], inc["is_demo"], {"RINGING": "Phone is ringing", "ANSWERED": "Call answered", "COMPLETED": f"Call completed ({e.get('duration_s')} s)", "BUSY": "Line busy", "NO_ANSWER": "Call not answered"}.get(d["status"], f"Call {d['status'].lower()}"), "ok" if d["status"] in ("RINGING", "ANSWERED", "COMPLETED") else "failed")
+
+
 def _poll_remote(incident_id: str, e: dict[str, Any], demo: bool) -> None:
-    """Follow the call using the provider's own status until it ends (about two minutes)."""
-    for _ in range(20):
-        time.sleep(6)
-        new = remote_status(e["provider"], e["provider_call_id"])
+    """Follow the call with the provider's own status until it ends. Short calls end in seconds, so poll often."""
+    gap = 3 if e["provider"] == "omnidimension" else 6
+    for _ in range(int(240 / gap)):
+        time.sleep(gap)
+        d = remote_detail(e["provider"], e["provider_call_id"])
+        new = d["status"] if d else None
         if new and new != e["status"]:
-            _set(incident_id, e, new, demo, {"RINGING": "Phone is ringing", "ANSWERED": "Call answered", "COMPLETED": "Call completed", "BUSY": "Line busy", "NO_ANSWER": "Call not answered"}.get(new, f"Call {new.lower()}"), "ok" if new in ("RINGING", "ANSWERED", "COMPLETED") else "failed")
+            if d.get("duration_s") is not None:
+                e["duration_s"] = d["duration_s"]
+            words = {"RINGING": "Phone is ringing", "ANSWERED": "Call answered", "COMPLETED": f"Call completed ({e['duration_s']} s)" if e.get("duration_s") is not None else "Call completed", "BUSY": "Line busy", "NO_ANSWER": "Call not answered"}
+            _set(incident_id, e, new, demo, words.get(new, f"Call {new.lower()}"), "ok" if new in ("RINGING", "ANSWERED", "COMPLETED") else "failed")
         if new in FINAL:
             return

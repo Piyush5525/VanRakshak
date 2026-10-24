@@ -66,7 +66,7 @@ def list_rows(table: str, where: str = "", args: tuple[Any, ...] = (), limit: in
 
 
 def decode_row(row: dict[str, Any]) -> dict[str, Any]:
-    json_columns = {"geometry", "source_scene_ids", "quality", "provenance", "evidence", "dates", "candidate_ids", "rationale", "result", "payload", "provider_response", "assumptions", "location", "coverage", "contacts", "bbox", "properties", "training", "metrics", "protocol", "cells", "params", "details", "evidence_mix", "detection", "verification", "forecast", "impact", "station", "route", "notify", "ivr", "field_updates", "history"}
+    json_columns = {"geometry", "source_scene_ids", "quality", "provenance", "evidence", "dates", "candidate_ids", "rationale", "result", "payload", "provider_response", "assumptions", "location", "coverage", "contacts", "bbox", "properties", "training", "metrics", "protocol", "cells", "params", "details", "evidence_mix", "detection", "verification", "forecast", "impact", "station", "route", "notify", "ivr", "field_updates", "history", "inputs", "document"}
     for key, value in list(row.items()):
         if key in json_columns and isinstance(value, str):
             try:

@@ -154,13 +154,26 @@ def compute_route(incident_id: str, router, station_id: str | None = None, max_c
     best_geom = _poly_small(best["geometry"], 600)
     res = {"status": "OK", "objective": "minimum estimated driving time (road network)", "selected_manually": bool(station_id),
            "station": public(st, best["straight_line_km"]), "provider": best["provider"], "distance_km": best["distance_km"], "duration_min": best["duration_min"], "adjusted_duration_min": best["adjusted_duration_min"],
-           "geometry": best_geom, "steps": best["steps"], "reasons": best["reasons"], "alternatives": best["alternatives"], "candidates": [{k: v for k, v in e.items() if k not in ("geometry", "steps", "alternatives", "reasons")} for e in evaluated],
+           "geometry": best_geom, "steps": best["steps"], "reasons": best["reasons"], "alternatives": best["alternatives"], "candidates": _merge_candidates([{k: v for k, v in e.items() if k not in ("geometry", "steps", "alternatives", "reasons")} for e in evaluated], (inc.get("route") or {}).get("candidates") if station_id else None),
            "calculated_at": t0.isoformat(), "duration_s": round((datetime.now(timezone.utc) - t0).total_seconds(), 1),
            "navigation_url": f"https://www.google.com/maps/dir/?api=1&origin={st['location']['coordinates'][1]},{st['location']['coordinates'][0]}&destination={lat},{lon}&travelmode=driving",
            "caveats": ["Road-network estimate only; typical driving time, not live traffic.", "Road closures, vehicle restrictions, terrain access, flooding and station availability are NOT verified.", "Forest tracks near the fire may be missing from road data; the final approach may be off-network.", "The station is unverified public mapping data. No dispatch has occurred."]}
     fireops.patch(incident_id, station=res["station"], route=res)
     fireops.log_event(incident_id, "route_calculated", "routing", "ok", f"Route calculated: {st['name']} -> incident, {res['distance_km']} km, ~{round(res['duration_min'])} min by road ({res['provider']})", ref=best["station_id"], is_demo=demo, details={"selected_manually": bool(station_id)})
     return res
+
+
+def _merge_candidates(fresh: list[dict[str, Any]], previous: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Choosing one station must not hide the others: keep the earlier comparison and update only the stations just routed."""
+    if not previous:
+        return fresh
+    by_id = {c["station_id"]: c for c in previous}
+    for c in fresh:
+        by_id[c["station_id"]] = c
+    for c in by_id.values():
+        c["selected"] = any(f["station_id"] == c["station_id"] and f.get("selected") for f in fresh)
+    order = [c["station_id"] for c in previous] + [c["station_id"] for c in fresh if c["station_id"] not in {x["station_id"] for x in previous}]
+    return [by_id[i] for i in order]
 
 
 def _poly_small(geom: dict | None, max_pts: int = 200) -> dict | None:

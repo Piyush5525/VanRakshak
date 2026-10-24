@@ -236,7 +236,7 @@ def test_telegram_buttons_only_work_for_authorised_chats_and_ack_is_not_arrival(
 def test_ivr_simulated_is_labelled_and_real_is_gated(monkeypatch):
     inc = new_incident(demo=True, status="DISPATCH_REQUESTED")
     e = fireivr.place_call(inc["id"], "simulated", False, "admin")
-    assert e["simulated"] is True and "test scenario" in e["script"].lower()
+    assert e["simulated"] is True and "test scenario" not in e["script"].lower() and "forest fire has been detected" in e["script"]
     time.sleep(5.5)
     calls = fireops.get(inc["id"])["ivr"]["calls"]
     assert [h["status"] for h in calls[0]["history"]] == ["QUEUED", "INITIATED", "RINGING", "ANSWERED", "COMPLETED"]
@@ -369,7 +369,7 @@ def test_omnidimension_call_is_dispatched_with_the_message_and_followed_by_its_o
             sent.update(url=url, **k)
             return httpx.Response(200, json={"success": True, "status": "dispatched", "requestId": 77}, request=httpx.Request("POST", url))
         def get(self, url, **k):
-            rows = [{"call_request_id": 76, "call_status": "failed"}, {"call_request_id": 77, "call_status": "completed"}]
+            rows = [{"call_request_id": {"id": 76, "type_of_request": "Call"}, "call_status": "failed"}, {"call_request_id": {"id": 77, "type_of_request": "Call"}, "call_status": "completed", "call_duration_in_seconds": "14.0"}]
             return httpx.Response(200, json={"call_log_data": rows}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(fireivr.httpx, "Client", Fake)
@@ -383,3 +383,24 @@ def test_omnidimension_call_is_dispatched_with_the_message_and_followed_by_its_o
     assert fireivr.remote_status("omnidimension", "77") == "COMPLETED" and fireivr.remote_status("omnidimension", "76") == "FAILED"
     monkeypatch.setattr(settings, "omnidim_api_key", None)
     assert "OMNIDIM_API_KEY" in fireivr.status()["missing"] and not fireivr.status()["real_ready"]
+
+
+def test_choosing_one_station_keeps_the_other_candidates_listed():
+    prev = [{"station_id": "a", "selected": True, "distance_km": 40}, {"station_id": "b", "selected": False, "distance_km": 20}, {"station_id": "c", "selected": False, "distance_km": 41}]
+    fresh = [{"station_id": "b", "selected": True, "distance_km": 20.35}]
+    out = firestations._merge_candidates(fresh, prev)
+    assert [c["station_id"] for c in out] == ["a", "b", "c"]
+    assert [c["selected"] for c in out] == [False, True, False] and out[1]["distance_km"] == 20.35
+    assert firestations._merge_candidates(fresh, None) == fresh
+
+
+def test_omnidimension_short_connection_is_not_reported_as_answered(monkeypatch):
+    for k, v in (("ivr_provider", "omnidimension"), ("omnidim_api_key", "k")):
+        monkeypatch.setattr(settings, k, v)
+
+    class Fake:
+        def get(self, url, **kw):
+            return httpx.Response(200, json={"call_log_data": [{"call_request_id": {"id": 5}, "call_status": "completed", "call_duration_in_seconds": "1.0", "hangup_reason": "Client disconnected"}]}, request=httpx.Request("GET", url))
+
+    d = fireivr.remote_detail("omnidimension", "5", Fake())
+    assert d["status"] == "NO_ANSWER" and d["duration_s"] == 1

@@ -48,8 +48,8 @@ VERIFICATION = {
     "AUTHORIZED_RECORD_MATCH": ("A matching, valid government record was found", "A person must still confirm that the work matches its scope and conditions."),
     "PARTIAL_OR_UNCLEAR_RECORD": ("A record overlaps but does not clearly cover this change", "Ask the issuing authority whether this clearing is covered."),
     "EXPIRED_OR_REVOKED_RECORD": ("A record overlaps but it is expired, revoked or outside its dates", "Check the record's validity with the issuing authority."),
-    "NO_RECORD_FOUND": ("No government record in this system covers the area", "This does NOT mean the work is illegal: this system only holds the records that were loaded into it."),
-    "INSUFFICIENT_EVIDENCE": ("The satellite evidence is too weak to act on yet", "Wait for another clear satellite pass or inspect on the ground."),
+    "NO_RECORD_FOUND": ("No government record in this system covers the area", "This does not mean the work is illegal."),
+    "INSUFFICIENT_EVIDENCE": ("The satellite evidence is too weak to act on yet", "Wait for another clear pass or inspect on the ground."),
 }
 _ORDER = ["AUTHORIZED_RECORD_MATCH", "PARTIAL_OR_UNCLEAR_RECORD", "EXPIRED_OR_REVOKED_RECORD"]
 _MAP = {"MATCH_REQUIRES_REVIEW": "AUTHORIZED_RECORD_MATCH", "POTENTIAL_MATCH": "AUTHORIZED_RECORD_MATCH", "POSSIBLE_SCOPE_OR_CONDITION_MISMATCH": "PARTIAL_OR_UNCLEAR_RECORD", "AUTHORIZATION_STATUS_UNCLEAR": "PARTIAL_OR_UNCLEAR_RECORD", "RECORD_EXPIRED_OR_REVOKED_CANDIDATE": "EXPIRED_OR_REVOKED_RECORD"}
@@ -586,24 +586,28 @@ def _n_telegram(rec, text, plain, real, actor):
 
 
 def spoken(rec: dict[str, Any]) -> str:
-    """The call script for a tree-loss record: where, how much, when, and how far the responsible office is."""
+    """The call script for a tree-loss record, written to be heard: what, where, how much, who is nearest, what to do."""
     from app.services import geoinfo
 
     lat, lon = rec["lat"], rec["lon"]
     pl = geoinfo.place(lat, lon)
     a, r = rec.get("authority") or {}, rec.get("route") or {}
     est = date.fromisoformat(rec["est_date"])
-    parts = ["VanRakshak forest alert.", f"Record {rec['code'].replace('-', ' ')}.", f"Satellite images show about {rec['area_ha']:.1f} hectares of tree cover lost {('near ' + pl['name']) if pl else 'in a forest area'}, around {est.strftime('%d %B')}."]
-    parts.append(f"Location: {abs(lat):.3f} degrees {'north' if lat >= 0 else 'south'}, {abs(lon):.3f} degrees {'east' if lon >= 0 else 'west'}.")
+    days = (datetime.now(timezone.utc).date() - est).days
+    when = "in the last few days" if days <= 3 else f"around {est.strftime('%d %B')}, about {days} days ago"
+    parts = ["Hello. This is a VanRakshak forest alert. Please listen carefully.", f"Satellite images show about {rec['area_ha']:.1f} hectares of tree cover lost {('near ' + pl['name']) if pl else 'in a forest area'}, {when}."]
     v = (rec.get("verification") or {}).get("class")
     if v == "NO_RECORD_FOUND":
-        parts.append("No permit record covering this place was found in the system.")
+        parts.append("No permit covering this place was found in the system, so it needs to be checked.")
     elif v == "AUTHORIZED_RECORD_MATCH":
-        parts.append("A matching permit record was found and needs checking.")
+        parts.append("A matching permit was found, but it still needs to be checked.")
+    elif v in ("PARTIAL_OR_UNCLEAR_RECORD", "EXPIRED_OR_REVOKED_RECORD"):
+        parts.append("A permit exists nearby, but it may not cover this clearing.")
     if a.get("office") and r.get("status") == "OK":
         o = a["office"]
-        parts.append(f"The responsible office is {o['name']}, {round(r['distance_km'])} kilometres to the {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, about {geoinfo.say_minutes(r['duration_min'])} by road.")
-    parts.append("This comes from satellite images and must be checked on the ground. Please verify and respond. Details are in the VanRakshak application.")
+        parts.append(f"The responsible office is {o['name']}, {round(r['distance_km'])} kilometres {geoinfo.direction_from(lat, lon, o['lat'], o['lon'])} of the site, about {geoinfo.say_minutes(r['duration_min'])} by road.")
+    parts.append(f"The location is {abs(lat):.3f} degrees {'north' if lat >= 0 else 'south'}, {abs(lon):.3f} degrees {'east' if lon >= 0 else 'west'}. The record code is {rec['code'].replace('-', ' ')}.")
+    parts.append("This comes from satellite images and must be checked on the ground. The map and route are in the VanRakshak app. Please verify and respond.")
     return " ".join(parts)
 
 
@@ -637,12 +641,16 @@ def _poll_call(record_id: str, call_id: str | None, provider: str) -> None:
     if not call_id:
         return
     seen = None
-    for _ in range(20):   # about two minutes
-        time.sleep(6)
-        st = fireivr.remote_status(provider, call_id)
+    gap = 3 if provider == "omnidimension" else 6
+    for _ in range(int(240 / gap)):   # up to four minutes
+        time.sleep(gap)
+        d = fireivr.remote_detail(provider, call_id)
+        st = d["status"] if d else None
         if st and st != seen and st in _CALL_EVENT:
             seen = st
             et, lvl, msg = _CALL_EVENT[st]
+            if st == "COMPLETED" and d.get("duration_s") is not None:
+                msg = f"Call completed ({d['duration_s']} s)"
             log(et, "ivr", lvl, msg, record_id=record_id)
             rec = _get(record_id)
             hist = (rec["notify"] or {"history": []})["history"]
@@ -652,6 +660,23 @@ def _poll_call(record_id: str, call_id: str | None, provider: str) -> None:
             update("fc_records", "id", record_id, {"notify": {"history": hist}, "updated_at": now()})
         if st in ("COMPLETED", "BUSY", "NO_ANSWER", "FAILED", "CANCELLED"):
             return
+
+
+def refresh_calls(record_id: str) -> None:
+    """Ask the provider about a call that is still marked in progress (its background follower may have been lost in a restart)."""
+    from app.services import fireivr
+    rec = _get(record_id)
+    hist = (rec["notify"] or {"history": []})["history"] if rec else []
+    for h in hist:
+        if h["channel"] == "ivr" and h["mode"] == "real" and h["status"] in ("INITIATED", "RINGING", "ANSWERED") and h.get("provider_call_id"):
+            d = fireivr.remote_detail(fireivr.settings.ivr_provider, h["provider_call_id"])
+            if d and d["status"] in _CALL_EVENT and d["status"] != h["status"]:
+                et, lvl, msg = _CALL_EVENT[d["status"]]
+                if d["status"] == "COMPLETED" and d.get("duration_s") is not None:
+                    msg = f"Call completed ({d['duration_s']} s)"
+                log(et, "ivr", lvl, msg, record_id=record_id)
+                h["status"] = d["status"] if d["status"] in ("RINGING", "ANSWERED", "COMPLETED") else "FAILED"
+                update("fc_records", "id", record_id, {"notify": {"history": hist}, "updated_at": now()})
 
 
 def _n_email(rec, text, plain, real, actor):

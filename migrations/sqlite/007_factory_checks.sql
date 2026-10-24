@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS factory_checks (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, source TEXT NOT NULL, document TEXT, inputs TEXT NOT NULL, result TEXT, status TEXT NOT NULL, created_by TEXT, created_at TEXT NOT NULL);

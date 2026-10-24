@@ -27,7 +27,7 @@ The map starts clear. Nothing is drawn until you switch a layer on or choose an 
 | **Left: Map layers** | Switch on **NASA fire hotspots** (dots), **Heat zones** (where hotspots cluster) or **Tree cover history**. Satellite, Map and Terrain base views at the top. |
 | **🌲 Trees** | Pick 7 / 30 / 90 days or a custom range. **Check a new area**: draw a rectangle or any shape anywhere in India (up to 60 km² at 30 m, up to 240 km² at 60 m). Tree cover is shown as polygons that shrink over 90 → 30 → 7 days → today. Click a loss spot to review it, check permits, find the forest office and road route, and send an alert. |
 | **🔥 Fire** | Fire incidents from NASA hotspots (click a hotspot, then Investigate) or the five example incidents. Choosing one shows its 3 / 6 / 12 hour spread footprint and the route from the nearest station. Then send a Telegram alert or place a phone call. |
-| **📍 Reports** | Incidents you mark by hand (PDF report, factory info, air quality) and **case studies** showing what happens when a factory is built beside, or by clearing, a forest. |
+| **📍 Reports** | **Check a factory** (place it, fill in details or upload its PDF, see the effect on forest, air, water and people today and after 7 / 30 / 90 days), incidents you mark by hand, and worked **case studies**. |
 
 While something is running, a small progress card shows each step (for example placing the call → ringing → answered → finished). Each incident keeps a short record of major events only.
 
@@ -75,4 +75,4 @@ Tests use a temporary database and blank every provider key, so they cannot spen
 
 ## Docs
 
-[Forest change](docs/FOREST_CHANGE.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)
+[Forest change](docs/FOREST_CHANGE.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)

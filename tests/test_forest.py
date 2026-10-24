@@ -94,7 +94,7 @@ def test_records_are_deduplicated_across_scans():
 def test_five_record_classes():
     # no permit anywhere -> not proof of anything, just "no record found"
     a = new_record(geom=shifted(1.0))
-    assert fw.verify(a)["class"] == "NO_RECORD_FOUND" and "NOT mean" in fw.VERIFICATION["NO_RECORD_FOUND"][1]
+    assert fw.verify(a)["class"] == "NO_RECORD_FOUND" and "does not mean" in fw.VERIFICATION["NO_RECORD_FOUND"][1]
     # weak evidence
     b = new_record(geom=shifted(1.1), unc=60.0)
     assert fw.verify(b)["class"] == "INSUFFICIENT_EVIDENCE"

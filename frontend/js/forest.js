@@ -16,6 +16,7 @@ export function init({ map }) {
   for (const k of ['cover', 'lost', 'records', 'route', 'was', 'scanned', 'area', 'drawn']) S.layers[k] = L.layerGroup().addTo(map);
   map.createPane('cover'); map.getPane('cover').style.zIndex = 330;
   map.on('moveend', drawArea);
+  window.addEventListener('rk:watch-run', (e) => { S.busy = true; track(e.detail.id, pop({ icon: '🛰', title: 'Watching real change near the factory', steps: ['Finding satellite images', 'Reading optical and radar images', 'Looking for tree loss', 'Done'] })); });
   map.on('draw:created', (e) => { S.drawn = e.layer.toGeoJSON().geometry; S.drawing = false; showDrawn(); paint(); });
   window.addEventListener('rk:tab', (e) => show(e.detail === 'tree'));
   window.addEventListener('rk:layers', (e) => { S.on.cover = S.on.lost = S.on.scanned = !!e.detail.cover; draw(); paint(); });
@@ -132,7 +133,7 @@ function paint() {
       <div class="sub" style="margin-top:6px"><b id="areaInfo"></b></div>
       <button class="btn primary" id="scan" ${S.busy ? 'disabled' : ''} style="width:100%;margin-top:8px">${S.busy ? 'Checking satellites…' : '🛰 Check this area for tree loss'}</button>
       <div id="prog"></div></details>
-    <p class="fine">Satellite pictures show where tree cover disappeared, not why. A red outline means this system holds no permit that covers the spot; that is not proof of anything illegal.</p>`;
+    `;
   bind(box);
   drawArea();
 }
@@ -220,7 +221,7 @@ function paintRecord(box, r) {
     <div class="row-item" style="border:0;padding:6px 0"><span class="dot2" style="background:${AGE(r.age_days)};width:14px;height:14px"></span><span class="grow"><h2 style="font-size:18px">${r.code} · ${r.area_ha} ha</h2><div class="sub">${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}</div></span><span class="chip ${r.severity === 'HIGH' ? 'red' : r.severity === 'MEDIUM' ? 'amber' : ''}">${r.severity} size</span></div>
     <div class="facts"><div><b>${D(r.est_date)}</b><span>about when (±${Math.round(r.date_uncertainty_days || 0)} d)</span></div><div><b>${r.age_days} days</b><span>ago</span></div><div><b>${r.seen_count}×</b><span>seen in scans</span></div></div>
     <div class="sub">Seen by: ${r.evidence === 'optical_radar_agree' ? 'optical and radar satellites agree' : r.evidence === 'optical' ? 'optical satellite' : 'radar satellite'}.</div>
-    <div class="sect"><h4>Is there a permit?</h4>${raw(v ? `<div class="banner2 ${v.class === 'NO_RECORD_FOUND' ? 'red' : v.class === 'AUTHORIZED_RECORD_MATCH' ? 'green' : 'amber'}"><b>${esc(v.meaning)}</b><div class="sub">${esc(v.next_step)}</div><div class="sub">${v.records_in_system} permit record(s) loaded in this system.</div></div>` : '<div class="sub">Not checked.</div>')}</div>
+    <div class="sect"><h4>Is there a permit?</h4>${raw(v ? `<div class="banner2 ${v.class === 'NO_RECORD_FOUND' ? 'red' : v.class === 'AUTHORIZED_RECORD_MATCH' ? 'green' : 'amber'}"><b>${esc(v.meaning)}</b><div class="sub">${esc(v.next_step)}</div></div>` : '<div class="sub">Not checked.</div>')}</div>
     <div class="sect"><h4>What is it? <span class="sub">(change it any time)</span></h4>
       <label class="f">Cause<select id="cat"><option value="">Not decided</option>${raw(Object.entries(cats).map(([k, n]) => `<option value="${esc(k)}" ${r.category === k ? 'selected' : ''}>${esc(n)}</option>`).join(''))}</select></label>
       <div class="pills3" id="stat">${raw([['CONFIRMED', '✔ Real loss'], ['FIELD_CHECK', '🥾 Needs a visit'], ['FALSE_POSITIVE', '✖ Not a loss']].map(([k, n]) => `<button data-s="${k}" class="${r.status === k ? 'on' : ''}">${n}</button>`).join(''))}</div>
@@ -229,7 +230,7 @@ function paintRecord(box, r) {
       ${raw(a?.office ? `<div class="banner2 ${a.status === 'OK' ? 'green' : 'amber'}"><b>${esc(a.office.name)}</b><div class="sub">${a.office.straight_line_km} km away · unverified map data${a.office.phone ? ' · phone ' + esc(a.office.phone) : ''}</div>${rt?.status === 'OK' ? `<div><b>${rt.distance_km} km · about ${Math.round(rt.duration_min)} min</b> by road (${esc(rt.provider)}) <a href="${esc(rt.navigation_url)}" target="_blank" rel="noopener">Open in Google Maps</a></div><div class="sub">${esc(rt.caveats[1])}</div>` : `<div class="sub">${esc(a.reason || '')}</div>`}</div>` : a?.status === 'NO_AUTHORITY_FOUND' ? `<div class="banner2 amber">${esc(a.reason)}</div>` : '<div class="sub">Not looked up yet.</div>')}
       <button class="btn sm" id="findOff">${a?.office ? '↻ Look again' : '🔎 Find the forest office and route'}</button><div id="offRes"></div></div>
     <div class="sect"><h4>Send an alert</h4>
-      ${raw(!['CONFIRMED', 'FIELD_CHECK', 'REPORTED'].includes(r.status) ? '<div class="banner2 amber">First mark it “Real loss” or “Needs a visit”. Nothing is sent about unchecked spots.</div>' : '')}
+      ${raw(!['CONFIRMED', 'FIELD_CHECK', 'REPORTED'].includes(r.status) ? '<div class="banner2 amber">Mark it “Real loss” or “Needs a visit” first.</div>' : '')}
       <div class="row2 tog">${raw([['telegram', 'Telegram'], ['ivr', 'Phone call'], ['email', 'E-mail'], ['dashboard', 'Dashboard']].map(([k, n]) => `<label title="${ch[k]?.ready ? '' : 'Not set up: ' + esc((ch[k]?.missing || []).join(', '))}"><input type="checkbox" class="chn" value="${k}" ${['dashboard', 'telegram'].includes(k) ? 'checked' : ''} ${ch[k]?.ready ? '' : 'disabled'}> ${n}${ch[k]?.ready ? '' : ' <small>(not set up)</small>'}</label>`).join(''))}</div>
       <details style="margin:6px 0"><summary>What the phone call says</summary><div id="script" class="script">Loading…</div><button class="btn sm" id="hear" style="margin-top:6px">▶ Hear it</button></details>
       ${raw(canSend ? '' : '<div class="sub">Your role (' + esc(role) + ') cannot send alerts. Switch to Officer or Admin in the full console.</div>')}

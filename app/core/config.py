@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,7 +52,7 @@ class Settings(BaseSettings):
     omnidim_agent_id: int | None = None       # the voice agent that speaks the alert
     omnidim_from_number_id: int | None = None # optional: which of your OmniDimension numbers calls out
     omnidim_base_url: str = "https://backend.omnidim.io/api/v1"
-    ivr_response_number: str | None = None    # E.164 number of the response contact
+    ivr_response_number: str | None = Field(default=None, validation_alias=AliasChoices("IVR_RESPONSE_NUMBER", "ALERT_PHONE_NUMBER"))  # E.164 number that is called
     ivr_response_label: str = "Response contact"
     ivr_approved_numbers: str = ""            # optional comma list; if set, the response number must be on it
     public_base_url: str = "http://localhost:8000"
@@ -67,6 +68,18 @@ class Settings(BaseSettings):
             raise RuntimeError("ALLOW_REAL_NOTIFICATIONS requires CALLBACK_SECRET (16+ chars) to authenticate inbound callbacks")
         if self.auth_mode == "jwt" and not (self.jwt_secret and len(self.jwt_secret) >= 32):
             raise RuntimeError("AUTH_MODE=jwt requires JWT_SECRET of at least 32 characters")
+
+    @field_validator("omnidim_agent_id", "omnidim_from_number_id", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @model_validator(mode="after")
+    def _pick_voice_provider(self):
+        # an OmniDimension key + agent in .env is enough to turn real calling on; IVR_PROVIDER can still override it
+        if self.ivr_provider == "simulated" and self.omnidim_api_key and self.omnidim_agent_id:
+            self.ivr_provider = "omnidimension"
+        return self
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

@@ -4,6 +4,7 @@ import { config } from './map.js';
 import * as FIRE from './fire.js';
 import * as FOREST from './forest.js';
 import * as CASES from './cases.js';
+import * as FACTORY from './factory.js';
 
 const INDIA = [[6.5, 68.1], [37.1, 97.5]];
 const KIND = { cutting: ['Illegal cutting', '🪓', '#a8431f'], fire: ['Forest fire', '🔥', '#d9382a'], encroachment: ['Encroachment', '⛺', '#7a5a1f'], pollution: ['Industrial pollution', '🏭', '#5b4b8a'], other: ['Other', '📍', '#37474f'] };
@@ -99,7 +100,7 @@ async function loadFires(force = false) {
   try {
     const d = await api(`/live/fires?days=${fireDays}&source=${$('#src').value}${force ? '&force=true' : ''}`);
     fires = d.fires; fireMeta = d; drawFires(); paintFirePanel();
-    $('#fireNote').textContent = d.attribution + ' ' + d.bbox_note + '.';
+    $('#fireNote').textContent = '';
     if (d.warning) toast(d.warning, 'error');
   } catch (e) {
     fires = []; fireMeta = null; drawFires(); $('#fireCount').textContent = '–'; $('#fireList').innerHTML = html`<div class="empty"><b>Live fire data is unavailable</b>${e.message}</div>`; $('#fireSub').textContent = 'Not connected to NASA FIRMS';
@@ -134,15 +135,19 @@ async function loadIncidents() { incidents = await api('/incidents').catch(() =>
 const paintIncidentsIfListing = () => { if (!selected && !marking && $('#rightBody .list')) paintList(); };
 
 function paintList() {
-  CASES.clear();
+  CASES.clear(); FACTORY.clear();
   const open = incidents.filter((i) => !['CLOSED', 'DISMISSED'].includes(i.status));
   $('#rightBody').innerHTML = html`<div class="side-head"><div><h2>Incidents</h2><div class="sub">${open.length} report${open.length === 1 ? '' : 's'} · pick one to see it on the map</div></div></div>
     <button class="btn primary block" id="mark" style="margin:14px 0 10px">＋ Mark an incident</button>
     <div class="list">${open.length ? open.map((i) => { const [kn, em] = kindOf(i), [st, c] = STATUS[i.status] || [i.status, '']; return raw(`<button class="row-item" data-id="${esc(i.id)}"><span style="font-size:20px">${em}</span><span class="grow"><b>${esc(i.title)}</b><small>${esc(kn)} · ${esc(ago(new Date(i.created_at).getTime()))}</small></span><span class="chip ${c}">${esc(st)}</span></button>`); }) : raw('<div class="empty"><b>No incidents yet</b>Press “Mark an incident”, then click the place on the map.</div>')}</div>
+    <h3 style="margin-top:16px">Factory checks</h3>
+    <div id="facEntry"></div><div id="facList" class="list"></div>
     <h3 style="margin-top:16px">Case studies</h3><div class="sub">What happens when a factory is built beside, or by clearing, a forest.</div>
     <div id="caseList" class="cases"></div>
-    <p class="fine">Incidents you mark are saved here with a time stamp. They are reports from a person, not verified findings. Case studies are worked examples, not records of real companies.</p>`;
+    `;
   CASES.mountList($('#caseList'), (id) => CASES.open(id, paintList));
+  FACTORY.mountEntry($('#facEntry'), () => FACTORY.start(paintList));
+  FACTORY.mountList($('#facList'), paintList);
   $('#mark').onclick = startMarking;
   $$('#rightBody .row-item').forEach((b) => (b.onclick = () => showDetail(b.dataset.id)));
 }
@@ -184,7 +189,7 @@ async function showDetail(id) {
   $('#rightBody').innerHTML = html`<button class="back" id="back">‹ All incidents</button>
     <div class="row-item" style="border:0;padding:0"><span style="font-size:26px">${em}</span><span class="grow"><h2 style="font-size:17px">${i.title}</h2><div class="sub">${kn} · ${ago(new Date(i.created_at).getTime())}</div></span></div>
     <div style="margin:8px 0"><span class="chip ${c}">${st}</span> <span class="sub">${ll[0].toFixed(4)}, ${ll[1].toFixed(4)}</span></div>
-    ${raw(i.evidence?.note ? `<div class="note">${esc(i.evidence.note)}</div>` : '')}
+    
     <div class="sect"><h4>🔥 Fires nearby</h4>${raw(!fireMeta ? '<span class="sub">Fire data is not loaded.</span>' : near.length ? `<b>${near.length}</b> hotspot${near.length > 1 ? 's' : ''} within 10 km in the last ${fireDays * 24} h. Nearest: ${near[0].d.toFixed(1)} km${near[0].f[4] != null ? `, ${esc(near[0].f[4])} MW` : ''}.` : `None within 10 km in the last ${fireDays * 24} h.`)}</div>
     <div class="sect"><h4>🏭 Factory and emissions</h4><div id="siteBox">${raw(siteHtml(site))}</div>
       <div id="airBox" style="margin-top:10px"><span class="sub"><span class="spin"></span>Loading air quality…</span></div></div>
@@ -198,12 +203,12 @@ async function showDetail(id) {
     try { const r = await api(`/incidents/${i.id}/reports`, { method: 'POST' }); await download(`/reports/${r.pdf_id}/download`, `VanRakshak-report-${i.id.slice(0, 8)}.pdf`); $('#repOut').innerHTML = html`Report downloaded. <a href="#" id="jl">Get the JSON evidence package</a>`; $('#jl').onclick = (ev) => { ev.preventDefault(); download(`/reports/${r.id}/download`, `VanRakshak-evidence-${i.id.slice(0, 8)}.json`); }; }
     catch (e) { toast(e.message, 'error'); } finally { b.disabled = false; b.textContent = 'Generate report'; }
   };
-  api(`/live/air?lat=${ll[0]}&lon=${ll[1]}`).then((a) => { if (selected !== id) return; const row = (n, s) => `<tr><td>${n}</td><td><b>${s.now ?? '–'}</b> ${esc(s.unit)}</td><td>${s.max_24h ?? '–'}</td></tr>`; $('#airBox').innerHTML = `<div class="sub" style="font-weight:700;color:#1b2924">Air quality here (modelled)</div><table class="t"><tr><th></th><th>Now</th><th>Max 24 h</th></tr>${row('PM2.5', a.pm2_5)}${row('PM10', a.pm10)}${row('NO₂', a.no2)}${row('SO₂', a.so2)}</table><div class="note">${esc(a.kind)}. ${esc(a.attribution)}</div>`; }).catch((e) => { if (selected === id) $('#airBox').innerHTML = `<div class="note warn">Air quality unavailable: ${esc(e.message)}</div>`; });
+  api(`/live/air?lat=${ll[0]}&lon=${ll[1]}`).then((a) => { if (selected !== id) return; const row = (n, s) => `<tr><td>${n}</td><td><b>${s.now ?? '–'}</b> ${esc(s.unit)}</td><td>${s.max_24h ?? '–'}</td></tr>`; $('#airBox').innerHTML = `<div class="sub" style="font-weight:700;color:#1b2924">Air quality here</div><table class="t"><tr><th></th><th>Now</th><th>Max 24 h</th></tr>${row('PM2.5', a.pm2_5)}${row('PM10', a.pm10)}${row('NO₂', a.no2)}${row('SO₂', a.so2)}</table><div class="note">${esc(a.kind)}. ${esc(a.attribution)}</div>`; }).catch((e) => { if (selected === id) $('#airBox').innerHTML = `<div class="note warn">Air quality unavailable: ${esc(e.message)}</div>`; });
 }
 function siteHtml(site) {
-  if (!site) return '<div class="sub">Add a nearby factory if it applies. Emission figures are shown only if someone enters them with their source; the system does not estimate them.</div><div style="margin-top:8px"><button class="btn" id="siteAdd">Add factory info</button></div>';
+  if (!site) return '<div class="sub">Add a nearby factory if it applies.</div><div style="margin-top:8px"><button class="btn" id="siteAdd">Add factory info</button></div>';
   const rows = (site.emissions || []).map((e) => `<tr><td>${esc(e.pollutant)}</td><td><b>${esc(e.value)}</b> ${esc(e.unit)}</td><td>${esc(e.source)}${e.as_of ? ' (' + esc(e.as_of) + ')' : ''}</td></tr>`).join('');
-  return `<b>${esc(site.name)}</b> <span class="chip">${esc(site.kind)}</span>${site.note ? `<div class="sub">${esc(site.note)}</div>` : ''}${rows ? `<table class="t"><tr><th>Pollutant</th><th>Reported</th><th>Source</th></tr>${rows}</table>` : '<div class="sub" style="margin-top:6px">No emission figures entered.</div>'}<div class="note">Entered by a person (${esc(site.entered_by_role)}) and not verified. It does not show that this site caused anything.</div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn" id="siteEdit">Edit</button><button class="btn danger" id="siteDel">Remove</button></div>`;
+  return `<b>${esc(site.name)}</b> <span class="chip">${esc(site.kind)}</span>${site.note ? `<div class="sub">${esc(site.note)}</div>` : ''}${rows ? `<table class="t"><tr><th>Pollutant</th><th>Reported</th><th>Source</th></tr>${rows}</table>` : '<div class="sub" style="margin-top:6px">No emission figures entered.</div>'}<div class="sub">Entered by a person (${esc(site.entered_by_role)}), not verified.</div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn" id="siteEdit">Edit</button><button class="btn danger" id="siteDel">Remove</button></div>`;
 }
 
 function siteDialog(inc) {
@@ -240,4 +245,5 @@ loadIncidents().then(paintList);
 FIRE.init({ map });
 FOREST.init({ map });
 CASES.init({ map });
+FACTORY.init({ map });
 FIRE.switchTab('tree');

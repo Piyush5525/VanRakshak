@@ -135,6 +135,11 @@ def list_records(days: int = Query(90, ge=1, le=365), bbox: str | None = None, s
 
 @api.get("/records/{rid}")
 def get_record(rid: str, role: Role = Depends(require_roles(*READ))):
+    _rec(rid)
+    try:
+        fw.refresh_calls(rid)
+    except Exception:  # noqa: BLE001
+        pass
     return fw.public(_rec(rid), True)
 
 

@@ -38,7 +38,7 @@ def test_example_incidents_are_chosen_one_by_one_and_the_map_stays_clear_until_t
     page.click("#stabs button[data-k=forecast]")
     page.wait_for_selector("#hz")
     txt = page.inner_text("#pane")
-    assert "PREDICTED RISK FOOTPRINT, not a fire perimeter" in txt and "ha" in txt
+    assert "Predicted spread area, not a fire perimeter" in txt and "ha" in txt
     page.click("#hz button[data-h='3']")
     assert page.locator("#hz button.on").inner_text() == "3 h"
     # alert tab: the call text is written out, and what is missing for real sending is said plainly

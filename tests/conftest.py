@@ -12,7 +12,7 @@ os.environ["AUTH_MODE"] = "dev_header"
 os.environ["RATE_LIMIT_PER_MINUTE"] = "0"
 os.environ["ALLOW_REAL_NOTIFICATIONS"] = "false"
 # Real provider keys live in .env for the running app; tests must never be able to use them.
-for _k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "CALLBACK_SECRET"):
+for _k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "CALLBACK_SECRET", "OMNIDIM_API_KEY", "OMNIDIM_AGENT_ID", "OMNIDIM_FROM_NUMBER_ID", "IVR_RESPONSE_NUMBER", "ALERT_PHONE_NUMBER"):
     os.environ[_k] = ""
 os.environ["ROUTING_PROVIDER"] = "unconfigured"
 os.environ["VOICE_PROVIDER"] = "disabled"

@@ -41,6 +41,7 @@ from app.services.wildfire import FirmsUnavailable, fetch_firms, store_detection
 from app.services.satellite import AcquisitionConfig
 from app.fire_routes import api as fire_api
 from app.forest_routes import api as forest_api
+from app.factory_routes import api as factory_api
 from app.live_routes import api as live_api
 from app.rakshak_routes import api as rakshak_api
 from app.ops_routes import api as ops_api, notifier, router_service
@@ -81,6 +82,7 @@ app.include_router(rakshak_api)
 app.include_router(live_api)
 app.include_router(fire_api)
 app.include_router(forest_api)
+app.include_router(factory_api)
 app.add_middleware(RequestContextMiddleware, per_minute=settings.rate_limit_per_minute)
 
 

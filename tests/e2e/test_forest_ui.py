@@ -35,7 +35,7 @@ fw._ingest(run, [{"geometry": sq(81.01, 21.71, 0.004), "area_ha": 3.4, "est_date
 def seeded():
     tmp = tempfile.mkdtemp(prefix="rakshak-forest-e2e-")
     port = free_port()
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{tmp}/e2e.db", "REPORT_OUTPUT_DIR": f"{tmp}/r", "RASTER_DIR": f"{tmp}/ras", "MODEL_DIR": f"{tmp}/m", "EVIDENCE_DIR": f"{tmp}/ev", "ENVIRONMENT": "test", "AUTH_MODE": "dev_header", "RATE_LIMIT_PER_MINUTE": "0", "PYTHONUTF8": "1", **{k: "" for k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN")}, "ROUTING_PROVIDER": "unconfigured"}
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{tmp}/e2e.db", "REPORT_OUTPUT_DIR": f"{tmp}/r", "RASTER_DIR": f"{tmp}/ras", "MODEL_DIR": f"{tmp}/m", "EVIDENCE_DIR": f"{tmp}/ev", "ENVIRONMENT": "test", "AUTH_MODE": "dev_header", "RATE_LIMIT_PER_MINUTE": "0", "PYTHONUTF8": "1", **{k: "" for k in ("MAPBOX_API", "SERP_API", "FIRMS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OSRM_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "OMNIDIM_API_KEY", "OMNIDIM_AGENT_ID", "OMNIDIM_FROM_NUMBER_ID", "IVR_RESPONSE_NUMBER", "ALERT_PHONE_NUMBER")}, "ROUTING_PROVIDER": "unconfigured"}
     subprocess.run([sys.executable, "-c", SEED], cwd=ROOT, env=env, check=True)
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port), "--log-level", "warning"], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(60):
@@ -81,12 +81,12 @@ def test_tree_loss_panel_shows_history_lets_you_edit_a_spot_and_alerts_inline(se
     page.wait_for_selector("#stat")
     assert page.locator(".pin.tree").count() == 1
     text = page.inner_text("#forestBody")
-    assert "No government record" in text and "NOT mean the work is illegal" in text
+    assert "No government record" in text and "does not mean the work is illegal" in text
     assert text.lower().count("illegal") == 1   # only inside the "does NOT mean illegal" warning
-    assert "First mark it" in text and "practice" not in text.lower() and "simulat" not in text.lower()
+    assert "first." in text and "practice" not in text.lower() and "simulat" not in text.lower()
     page.select_option("#cat", "suspected_felling")
     page.click("#stat button[data-s='CONFIRMED']")
-    page.wait_for_function("!document.querySelector('#forestBody').innerText.includes('First mark it')")
+    page.wait_for_function("!document.querySelector('#forestBody').innerText.includes('first.')")
     # the phone message is written out in full
     page.click("#forestBody details summary")
     page.wait_for_function("document.querySelector('#script').innerText.includes('tree cover lost')", timeout=15000)

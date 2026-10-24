@@ -133,6 +133,11 @@ def list_incidents(include_demo: bool = True, role: Role = Depends(require_roles
 
 @api.get("/incidents/{iid}")
 def get_incident(iid: str, role: Role = Depends(require_roles(*READ))):
+    _inc(iid)
+    try:
+        fireivr.refresh_calls(iid)
+    except Exception:  # noqa: BLE001 - a provider hiccup must not break the incident view
+        pass
     return public_incident(_inc(iid))
 
 
