@@ -116,6 +116,23 @@ Every incident (a reported incident, a fire, or a tree-loss spot) has an **Open 
 
 ![A simulated fire spreading through a simulated forest inside an incident boundary](docs/images/forest-simulation-fire.png)
 
+### Ranger AR navigation on a phone
+
+Every incident has an **Open Ranger AR Navigation** button (live map and Investigations). It opens the incident's real polygon (or a marker for a point), the recommended and alternative routes from the nearest station (🚗 road, 🚶 walking), and a **QR code** headed "Open on ranger phone".
+
+Scan it and the phone opens a guidance page: camera behind a large arrow, distance and bearing to the incident, GPS accuracy, route progress, off-route warnings and a Recalculate button. If the camera, compass or GPS is refused, the page says so and still guides. The link is signed, expires in about 45 minutes and carries only the incident and the expiry, no password. Only the latest position is kept, and it is deleted when the ranger exits. It is guidance only and can be wrong under canopy.
+
+**To use it on a phone** (same Wi-Fi as the computer):
+
+```powershell
+# once, as Administrator: let phones reach the computer
+New-NetFirewallRule -DisplayName "VanRakshak phone" -Direction Inbound -Protocol TCP -LocalPort 8000,8443 -Action Allow -Profile Any
+# phones only allow the camera and location on HTTPS, so start the HTTPS server
+python scripts/run_phone_https.py
+```
+
+Open the printed `https://<computer address>:8443/live` on the phone once and choose Advanced, then Continue (the certificate is self-made, kept in `data/certs/`, and never committed). QR codes made after that use this address. To use a public HTTPS tunnel instead, set `MOBILE_PUBLIC_BASE_URL`.
+
 ### One decision: Escalate or False alarm
 
 ```mermaid
@@ -195,6 +212,7 @@ Never commit `.env` (it is in `.gitignore`).
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram alerts |
 | `IVR_PROVIDER=omnidimension`, `OMNIDIM_API_KEY`, `OMNIDIM_AGENT_ID`, `IVR_RESPONSE_NUMBER` | Phone calls through OmniDimension. The agent must be set up to read the `message` it is given |
 | `SMTP_*`, `FOREST_ALERT_EMAIL_TO` | E-mail alerts (optional) |
+| `MOBILE_PUBLIC_BASE_URL`, `MOBILE_LINK_SECRET`, `MOBILE_LINK_MINUTES` | Phone QR links: the address a phone can reach (default: this computer's network address), the signing key, and how long a link works (default 45) |
 
 Restart the server after editing `.env`. Real messages and calls are only sent after an explicit confirmation in the interface.
 
@@ -226,4 +244,4 @@ Tests use a temporary database, blank every provider key and switch the public r
 
 ## Docs
 
-[Forest change](docs/FOREST_CHANGE.md) · [New construction](docs/INFRA_CHANGE.md) · [3D simulation](docs/FOREST_SIMULATION.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)
+[Forest change](docs/FOREST_CHANGE.md) · [New construction](docs/INFRA_CHANGE.md) · [3D simulation](docs/FOREST_SIMULATION.md) · [Ranger AR navigation](#ranger-ar-navigation-on-a-phone) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)
