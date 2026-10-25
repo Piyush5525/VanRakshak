@@ -72,7 +72,7 @@ def test_every_page_renders_without_script_errors_on_an_empty_database(server, b
     page.goto(f"{server}/app#/overview", wait_until="networkidle")
     page.wait_for_timeout(500)
     text = page.inner_text("#view")
-    assert "Not available" in text  # spatial risk model must read as unavailable, not as a placeholder
+    assert "Needs your attention" in text and "Live fire incidents" in text
     assert "0 ha" in text and "1,930" not in text  # no stored or sample figures leak into an empty system
     ctx.close()
 
@@ -84,9 +84,9 @@ def test_root_opens_live_map_and_console_route(server, browser):
     page.goto(server + "/app", wait_until="load")
     page.wait_for_url("**/app")
     page.wait_for_selector("#nav .nav-item")
-    assert page.locator("#nav .nav-item").count() == 4  # Live map + Replanting intelligence + 2 AR tools
+    assert page.locator("#nav .nav-item").count() == 5  # Overview, Live map, Forest Explorer, Replanting, Ranger Navigation
     assert page.locator('#nav a[href="/replanting/"]').count() == 1
-    assert page.locator('.nav-group').inner_text().lower() == 'ar tools'
+    assert [t.lower() for t in page.locator('.nav-group').all_inner_texts()] == ['home', 'explore']
     page.close()
 
 

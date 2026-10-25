@@ -105,3 +105,43 @@ dialog{border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 3
 .fx-side select,.fx-controls select{min-height:40px}
 @media(max-width:1100px){.fx-layout{grid-template-columns:1fr}.fx-how{grid-template-columns:1fr}.fx-stage{height:clamp(360px,56vh,560px)!important}}
 @media(prefers-reduced-motion:reduce){.fx-card-link{transition:none}.fx-card-link:hover{transform:none}}
+/* ===== console home ===== */
+.ov-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:18px;align-items:center;background:linear-gradient(135deg,#0f4a32,#1a7a52);color:#fff;border-radius:18px;padding:22px 24px}
+.ov-hero h2{margin:0 0 6px;font-size:26px}.ov-hero p{margin:0;color:#d4efe0;font-size:14.5px;line-height:1.5}
+.ov-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ov-act{display:flex;gap:10px;align-items:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:14px;padding:12px;color:#fff;text-decoration:none;min-height:56px;transition:background .15s,transform .15s}
+.ov-act:hover{background:rgba(255,255,255,.22);transform:translateY(-1px)}.ov-act b{display:block;font-size:14px}.ov-act small{display:block;color:#cfe9da;font-size:12px}.ov-ai{font-size:22px}
+.ov-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-top:16px}
+.ov-tile{display:flex;flex-direction:column;gap:3px;background:#fff;border:1px solid var(--line,#dfe8e2);border-radius:16px;padding:16px;text-decoration:none;color:inherit;transition:border-color .15s,box-shadow .15s,transform .15s}
+.ov-tile:hover{border-color:#6fb18c;box-shadow:0 8px 22px rgba(20,87,60,.12);transform:translateY(-2px)}
+.ov-ic{font-size:20px}.ov-tile b{font-size:28px;line-height:1.1;font-weight:600}.ov-l{font-size:13.5px;font-weight:600}.ov-s{font-size:12px;color:#5b6b66}.ov-go{margin-top:6px;font-size:12.5px;font-weight:700;color:#14573c}
+.ov-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}.ov-list a{display:flex;justify-content:space-between;align-items:center;gap:10px;text-decoration:none;color:inherit;border:1px solid var(--line,#dfe8e2);border-radius:12px;padding:10px 12px;min-height:48px}.ov-list a:hover{border-color:#6fb18c;background:#f4faf6}.ov-list small{display:block;color:#5b6b66;font-size:12px}
+.ov-tile:focus-visible,.ov-act:focus-visible,.ov-list a:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}
+@media(max-width:900px){.ov-hero{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.ov-tile,.ov-act{transition:none}.ov-tile:hover,.ov-act:hover{transform:none}}
+
+/* ===== sidebar: glass-dark, like the live map ===== */
+.sidebar{background:radial-gradient(120% 60% at 0% 0%,rgba(46,160,105,.28),transparent 60%),linear-gradient(180deg,#0e3b28 0%,#0a2a1d 100%)!important;border-right:1px solid rgba(185,237,205,.1)}
+.brand{display:flex!important;align-items:center;gap:12px;text-decoration:none;color:#fff;padding:6px 6px 14px}
+.brand-logo{width:40px;height:40px;filter:drop-shadow(0 3px 8px rgba(0,0,0,.45))}
+.brand strong{display:block;font:700 20px "Space Grotesk",sans-serif;letter-spacing:.2px;background:linear-gradient(90deg,#fff,#b6f2d2);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand span{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fc9a9;margin-top:2px}
+.nav{display:flex;flex-direction:column;gap:6px}
+.nav-section{margin-top:10px}.nav-section-ar{margin-top:10px;padding-top:0;border-top:0}
+.nav-group{font-size:11px!important;letter-spacing:.16em!important;color:#7fb79a!important;padding:0 12px 8px!important}
+.nav-item{border-radius:14px!important;min-height:48px!important;color:#cfe9da!important;font-weight:600;position:relative;overflow:hidden}
+.nav-item::before{content:"";position:absolute;left:0;top:22%;bottom:22%;width:3px;border-radius:3px;background:transparent;transition:background .18s}
+.nav-item .nav-icon{width:30px!important;height:30px;flex:0 0 30px!important;border-radius:9px;background:rgba(185,237,205,.1);font-size:15px!important}
+.nav-item:hover{background:rgba(185,237,205,.12)!important;transform:translateX(3px)!important;border-color:rgba(185,237,205,.18)!important;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.nav-item.active{background:linear-gradient(90deg,rgba(76,201,140,.28),rgba(76,201,140,.08))!important;color:#fff!important;border-color:rgba(185,237,205,.22)!important}
+.nav-item.active::before{background:#7ee8ab}.nav-item.active .nav-icon{background:#7ee8ab;color:#0a2a1d}
+.nav-item-external{background:rgba(185,237,205,.05)!important}
+.nav-item:focus-visible{outline:3px solid #8fd9a8;outline-offset:2px}
+.trust-card{background:rgba(185,237,205,.08)!important;border:1px solid rgba(185,237,205,.16)!important;border-radius:16px!important;backdrop-filter:blur(8px)}
+@media(prefers-reduced-motion:reduce){.nav-item,.nav-item::before{transition:none}.nav-item:hover{transform:none!important}}
+
+.ov-tiles{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+@media(max-width:1100px){.ov-tiles{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:560px){.ov-tiles{grid-template-columns:1fr!important}}
+.ov-feed{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}.ov-feed li{border-left:3px solid #7ee8ab;background:#f4faf6;border-radius:0 10px 10px 0;padding:9px 12px}.ov-feed b{display:block;font-size:14px}.ov-feed small{color:#5b6b66;font-size:12px}
+.ov-tile{min-height:150px}

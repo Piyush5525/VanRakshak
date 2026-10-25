@@ -23,14 +23,15 @@ const NAV_PAGES = PAGES.filter((page) => page.group === 'AR');
 let current = null;
 
 function buildNav() {
+  const item = (href, icon, label, ext, page) => `<a class="nav-item${ext ? ' nav-item-external' : ''}" href="${href}"${page ? ` data-page="${page}"` : ''}><span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-label">${esc(label)}</span>${ext ? '<span class="nav-arrow" aria-hidden="true">↗</span>' : ''}</a>`;
+  const ar = Object.fromEntries(NAV_PAGES.map((p) => [p.id, p]));
   $('#nav').innerHTML = `
-    <div class="nav-section nav-section-primary">
-      <a class="nav-item nav-item-external" href="/live"><span class="nav-icon">◉</span><span class="nav-label">Live map</span><span class="nav-arrow">↗</span></a>
-      <a class="nav-item nav-item-external" href="/replanting/"><span class="nav-icon">✦</span><span class="nav-label">Replanting intelligence</span><span class="nav-arrow">↗</span></a>
-    </div>
-    <div class="nav-section nav-section-ar">
-      <div class="nav-group">AR tools</div>
-      ${NAV_PAGES.map((p) => `<a class="nav-item" href="#/${p.id}" data-page="${p.id}"><span class="nav-icon">${p.icon}</span><span class="nav-label">${esc(p.title.replace(/^AR\s+/, ''))}</span></a>`).join('')}
+    <div class="nav-section"><div class="nav-group">Home</div>${item('#/overview', '◈', 'Overview', false, 'overview')}</div>
+    <div class="nav-section"><div class="nav-group">Explore</div>
+      ${item('/live', '◉', 'Live map', true)}
+      ${item('#/ar-explorer', '⬡', 'Forest Explorer', false, 'ar-explorer')}
+      ${item('/replanting/', '✦', 'Replanting', true)}
+      ${ar['ar-navigation'] ? item('#/ar-navigation', '⌁', 'Ranger Navigation', false, 'ar-navigation') : ''}
     </div>`;
 }
 

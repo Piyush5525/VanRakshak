@@ -47,11 +47,11 @@ export async function renderIncident(root, src) {
     <div class="fx-layout">
       <section class="fx-main">
         <div class="ar-stage fx-stage" id="stage" tabindex="0" role="application" aria-label="3D simulated forest inside the incident boundary. Arrow keys turn the view, plus and minus zoom, space plays or pauses.">
-          <div class="ar-hud"><div class="ar-label" id="lab"></div><div class="ar-card" id="info">Drag to turn · scroll to zoom · click the ground to inspect a spot.</div></div>
+          <div class="ar-hud"><div class="sr-only" id="lab"></div><div class="ar-card" id="info">Drag to turn · scroll to zoom · click the ground to inspect a spot.</div></div>
           <div class="ar-hud" style="top:auto;bottom:12px"><div class="ar-card fx-prog" id="prog" aria-live="off"></div></div>
         </div>
         <div class="fx-controls">
-          <button class="button primary sm" id="play">▶ Play</button><button class="button subtle sm" id="pause" disabled>❚❚ Pause</button><button class="button subtle sm" id="reset">⟲ Reset</button><button class="button subtle sm" id="restart">Restart</button>
+          <button class="button primary sm" id="play">▶ Play</button><button class="button subtle sm" id="pause" disabled>❚❚ Pause</button><button class="button subtle sm" id="reset">⟲ Reset</button><button class="button subtle sm" id="restart">Restart</button><button class="button subtle sm" id="cam">Reset view</button>
           <input type="range" id="tl" min="0" max="1000" value="0" step="1" class="grow" aria-label="Simulation time"><span class="help fx-time" id="tlLab">0%</span>
           <label class="help">Speed <select id="spd"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
         </div>
@@ -68,8 +68,6 @@ export async function renderIncident(root, src) {
           <div class="fx-stats"><div class="fx-stat ok"><b id="sH">0</b><span>Healthy</span></div><div class="fx-stat fire"><b id="sB">0</b><span>Burning</span></div><div class="fx-stat ash"><b id="sX">0</b><span>Burned</span></div><div class="fx-stat soil"><b id="sC">0</b><span>Cleared</span></div></div>
           <div class="help" id="counts" role="status" style="margin-top:8px"></div></div>
         <div class="panel fx-card"><h4>The incident</h4><div class="stack" id="incPanel"></div></div>
-        <div class="panel fx-card"><h4>View</h4><div class="stack"><div class="row"><label><input type="checkbox" id="vTrees" checked> Trees</label><label><input type="checkbox" id="vPerim" checked> Fire perimeter</label><label><input type="checkbox" id="vParts" checked> Smoke and dust</label></div>
-          <div class="row"><button class="button subtle sm" id="cam">Reset camera</button></div></div></div>
       </aside>
     </div>`;
 
@@ -145,7 +143,7 @@ export async function renderIncident(root, src) {
     marks.clear();
     st.sim.ignitions.forEach((c) => { const m = new THREE.Mesh(new THREE.ConeGeometry(treeH * 0.35, treeH * 1.2, 8), new THREE.MeshBasicMaterial({ color: 0xffd23c })); m.position.set(st.sim.grid.cx(c % gw), treeH * 0.6, st.sim.grid.cz((c / gw) | 0)); m.userData.ignition = true; marks.add(m); });
     const sc = SCENARIOS[st.scenario];
-    $('#lab').textContent = sc.banner; $('#lab').style.background = 'rgba(180,100,10,.92)';
+    $('#lab').textContent = sc.banner;
     $('#windBox').style.display = st.scenario === 'deforestation' ? 'none' : '';
     $('#clrBox').style.display = st.scenario === 'combined' ? '' : 'none';
     $('#scnHelp').textContent = st.scenario === 'deforestation' ? 'Clearing spreads out from the middle of the boundary in a steady, irregular wave.' : st.scenario === 'fire' ? 'Fire starts at a simulated ignition point and spreads with the wind you choose until the simulation ends. Invented, not a forecast.' : 'Fire first, leaving burned ground; then clearing of the forest that is left.';
@@ -214,7 +212,7 @@ export async function renderIncident(root, src) {
   function syncButtons() { $('#play').disabled = st.playing; $('#pause').disabled = !st.playing; const sr = $('#simStatus'); if (sr) sr.textContent = st.playing ? 'Simulation playing' : st.t >= 1 ? 'Simulation finished' : st.t > 0 ? 'Simulation paused' : 'Simulation ready'; }
   const play = () => { if (st.t >= 1) st.t = 0; st.playing = true; syncButtons(); };
   const pause = () => { st.playing = false; syncButtons(); };
-  const reset = () => { st.playing = false; st.t = 0; st.dirty = true; [smoke, embers, dust].forEach((e) => e.clear()); syncButtons(); };
+  const reset = () => { st.playing = false; st.t = 0; st.dirty = true; [smoke, embers, dust].forEach((e) => e.clear()); syncButtons(); paintFrame(true); };
   $('#play').onclick = play; $('#pause').onclick = pause; $('#reset').onclick = reset; $('#restart').onclick = () => { reset(); play(); };
   $('#spd').onchange = (e) => { st.speed = +e.target.value; };
   $('#tl').oninput = (e) => { st.t = +e.target.value / 1000; st.playing = false; st.dirty = true; syncButtons(); };
@@ -222,9 +220,6 @@ export async function renderIncident(root, src) {
   $('#wdir').onchange = (e) => { st.windDeg = +e.target.value; rebuild(); };
   $('#wstr').onchange = (e) => { st.windKey = e.target.value; rebuild(); };
   $('#clrAfter').onchange = (e) => { st.clearAfter = e.target.checked; rebuild(); };
-  $('#vTrees').onchange = (e) => { st.trees = e.target.checked; st.dirty = true; };
-  $('#vPerim').onchange = (e) => { st.perim = e.target.checked; st.dirty = true; };
-  $('#vParts').onchange = (e) => { st.parts = e.target.checked; };
   $('#cam').onclick = home;
   controls.listenToKeyEvents(stage);   // arrow keys turn the view when the scene has focus
   stage.addEventListener('keydown', (e) => { if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); (st.playing ? pause : play)(); } else if (e.key === '+' || e.key === '=') camera.position.lerp(controls.target, 0.12); else if (e.key === '-') camera.position.lerp(controls.target, -0.12); });
