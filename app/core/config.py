@@ -29,6 +29,7 @@ from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -85,6 +86,9 @@ class Settings(BaseSettings):
     ivr_response_label: str = "Response contact"
     ivr_approved_numbers: str = ""            # optional comma list; if set, the response number must be on it
     public_base_url: str = "http://localhost:8000"
+    mobile_public_base_url: str | None = None   # what a phone can reach (LAN address or HTTPS tunnel); defaults to the address the desktop page was opened on
+    mobile_link_secret: str | None = None       # signs the phone links; falls back to JWT_SECRET, CALLBACK_SECRET, then a generated file
+    mobile_link_minutes: int = 45               # how long a phone link works
 
     @property
     def is_production(self) -> bool:
@@ -102,6 +106,13 @@ class Settings(BaseSettings):
     @classmethod
     def _blank_is_unset(cls, v):
         return None if isinstance(v, str) and not v.strip() else v
+
+    @model_validator(mode="after")
+    def _pick_voice_provider(self):
+        # an OmniDimension key + agent in .env is enough to turn real calling on; IVR_PROVIDER can still override it
+        if self.ivr_provider == "simulated" and self.omnidim_api_key and self.omnidim_agent_id:
+            self.ivr_provider = "omnidimension"
+        return self
 
     @model_validator(mode="after")
     def _pick_voice_provider(self):

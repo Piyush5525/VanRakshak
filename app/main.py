@@ -42,6 +42,7 @@ from app.services.satellite import AcquisitionConfig
 from app.fire_routes import api as fire_api
 from app.forest_routes import api as forest_api
 from app.infra_routes import api as infra_api
+from app.mobile_routes import api as mobile_api
 from app.factory_routes import api as factory_api
 from app.live_routes import api as live_api
 from app.rakshak_routes import api as rakshak_api
@@ -97,6 +98,7 @@ app.include_router(live_api)
 app.include_router(fire_api)
 app.include_router(forest_api)
 app.include_router(infra_api)
+app.include_router(mobile_api)
 app.include_router(factory_api)
 app.include_router(replanting_api)
 app.add_middleware(RequestContextMiddleware, per_minute=settings.rate_limit_per_minute)
@@ -596,6 +598,11 @@ if frontend_dir.exists():
     @app.get("/live", include_in_schema=False)
     def live_map():
         return FileResponse(frontend_dir / "live.html")
+
+    @app.get("/mobile/ar/{token}", include_in_schema=False)
+    def mobile_ar(token: str):
+        """The phone page for Ranger AR Navigation. The link is checked by the API calls the page makes; nothing secret is in the page."""
+        return FileResponse(frontend_dir / "mobile-ar.html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(self), geolocation=(self), accelerometer=(self), gyroscope=(self), magnetometer=(self)"})
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

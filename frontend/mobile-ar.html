@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a2a1d">
+<meta name="referrer" content="no-referrer">
+<title>Ranger guidance · VanRakshak</title>
+<link rel="icon" href="/assets/public/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/mobile-ar.css">
+</head>
+<body>
+<main id="app" aria-live="polite">
+  <section id="s-load" class="card"><p class="muted">Opening the link…</p></section>
+  <section id="s-error" class="card" hidden><h1>This link cannot be used</h1><p id="errMsg"></p><p class="muted">Ask the control room for a new QR code.</p></section>
+
+  <section id="s-start" class="card" hidden>
+    <div class="brand"><img src="/assets/public/logo.svg" alt="" width="36" height="36"><div><b>VanRakshak</b><span>Ranger guidance</span></div></div>
+    <h1 id="incTitle"></h1>
+    <dl class="kv"><dt>Status</dt><dd id="incStatus"></dd><dt>Evidence</dt><dd id="incEvidence"></dd><dt>Location</dt><dd id="incGeom"></dd><dt>Link valid until</dt><dd id="incExp"></dd></dl>
+    <div class="note" id="secureWarn" hidden></div>
+    <label class="consent"><input type="checkbox" id="consent"><span>I agree to share this phone's location with the server while I am being guided. Only my latest position and summary figures are kept; no track is stored, and my position is deleted when I exit.</span></label>
+    <button class="btn primary" id="go" disabled>Start guidance</button>
+    <div id="startMsg" class="msg" role="status"></div>
+    <details id="manualBox" hidden><summary>Enter my position by hand</summary>
+      <div class="row2"><label>Latitude<input type="number" step="any" id="mlat" inputmode="decimal"></label><label>Longitude<input type="number" step="any" id="mlon" inputmode="decimal"></label></div>
+      <button class="btn" id="mgo">Use these coordinates</button></details>
+    <p class="muted small">Browser guidance can be inaccurate under canopy or near buildings. Stop safely before interacting with the device and follow official field procedures.</p>
+  </section>
+
+  <section id="s-guide" class="hud" hidden aria-label="Guidance">
+    <video id="cam" playsinline muted></video>
+    <div class="top"><span class="chip" id="hMode">Starting…</span><span class="chip" id="hGps">GPS…</span><span class="chip" id="hCompass">Compass…</span></div>
+    <div class="mid"><svg id="arrow" class="arrow" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 5 L88 85 L50 66 L12 85 Z" fill="#7dff9e" stroke="#06361a" stroke-width="4" stroke-linejoin="round"/></svg>
+      <div class="inc" id="hTitle"></div></div>
+    <div class="bottom">
+      <div id="hWarn"></div>
+      <div class="instr" id="hInstr">Waiting for a position…</div>
+      <div class="stats"><div><b id="hDist">–</b><span>to the incident</span></div><div><b id="hBearing">–</b><span>bearing</span></div><div><b id="hAcc">–</b><span>GPS accuracy</span></div></div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Route progress"><i id="hProg"></i></div>
+      <div class="muted small" id="hRoute">Route progress 0%</div>
+      <div class="btns"><button class="btn" id="hRe">Recalculate</button><button class="btn danger" id="hExit">Exit</button></div>
+      <p class="muted small">Browser guidance can be inaccurate under canopy or near buildings. Stop safely before interacting with the device and follow official field procedures.</p>
+    </div>
+  </section>
+
+  <section id="s-end" class="card" hidden><h1>Guidance ended</h1><p id="endMsg"></p><p class="muted">Your last position was deleted from the server. You can close this page.</p></section>
+</main>
+<script type="module" src="/assets/js/mobile-ar.js"></script>
+</body>
+</html>

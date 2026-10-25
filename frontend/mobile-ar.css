@@ -1,0 +1,33 @@
+:root{--bg:#0a2a1d;--card:#f4faf6;--ink:#10261b;--muted:#5b6b66;--green:#14573c;--line:#d5e0d9;--warn:#b8321f}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
+main{min-height:100vh;display:flex;flex-direction:column;padding:max(14px,env(safe-area-inset-top)) 14px max(14px,env(safe-area-inset-bottom))}
+.card{background:var(--card);border-radius:18px;padding:18px;margin:auto 0;max-width:560px;width:100%;align-self:center}
+h1{font-size:21px;line-height:1.25;margin:10px 0;overflow-wrap:anywhere}
+.brand{display:flex;gap:10px;align-items:center}.brand b{display:block;font-size:18px}.brand span{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:8px 0 14px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0;overflow-wrap:anywhere}
+.muted{color:var(--muted)}.small{font-size:13px}
+.note{border:1px solid #f0d7a8;background:#fff8e8;color:#6a4a10;border-radius:12px;padding:10px 12px;font-size:14px;margin:10px 0}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0}.consent input{width:24px;height:24px;flex:none;margin-top:2px}
+.btn{min-height:48px;min-width:48px;padding:0 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font-weight:600;font-size:16px;font-family:inherit;cursor:pointer;width:100%}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}.btn.danger{background:#fff;border-color:var(--warn);color:var(--warn)}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}
+.msg{min-height:22px;margin:10px 0;font-size:14px}.msg.bad{color:var(--warn)}
+details{margin:10px 0}summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.row2 label{display:grid;gap:4px;font-size:14px}.row2 input{min-height:46px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font:inherit;width:100%}
+.hud{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:space-between;background:#0e1a14;color:#fff;overflow:hidden}
+.hud video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.92}
+.hud>*:not(video){position:relative;z-index:2}
+.top{display:flex;flex-wrap:wrap;gap:6px;padding:max(10px,env(safe-area-inset-top)) 10px 0}.chip{background:rgba(0,0,0,.66);border-radius:10px;padding:7px 10px;font-size:13px}
+.mid{display:grid;place-items:center;text-align:center;gap:6px;padding:0 12px}
+.arrow{width:min(52vw,230px);height:min(52vw,230px);transition:transform .25s;filter:drop-shadow(0 4px 12px rgba(0,0,0,.7))}
+.inc{background:rgba(0,0,0,.6);border-radius:10px;padding:6px 12px;font-weight:700;max-width:92vw;overflow-wrap:anywhere}
+.bottom{padding:12px 12px max(12px,env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.88) 24%);display:grid;gap:8px}
+.instr{font-size:24px;font-weight:700;line-height:1.2}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stats div{background:rgba(255,255,255,.12);border-radius:12px;padding:8px;text-align:center}.stats b{display:block;font-size:20px}.stats span{font-size:12px;color:#cfe}
+.bar{height:10px;background:rgba(255,255,255,.2);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#7dff9e}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}.hud .btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3);color:#fff}.hud .btn.danger{border-color:#ff8a78;color:#ffd7d1}
+.warn{background:#b8321f;border-radius:10px;padding:8px 12px;font-size:14px;margin-bottom:4px}.ok{background:#1d6b4b;border-radius:10px;padding:6px 12px;font-size:14px}.amber{background:#8a5a12}
+@media(max-width:360px){.instr{font-size:20px}.stats b{font-size:17px}}
+@media(prefers-reduced-motion:reduce){.arrow{transition:none}}

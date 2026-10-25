@@ -18,3 +18,4 @@ data/*.geojson
 .pytest_cache/
 
 data/infra/
+data/certs/

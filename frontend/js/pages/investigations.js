@@ -27,7 +27,7 @@ export async function render(root, { params }) {
     const inc = c.incident, ch = c.change, ev = inc.evidence || {};
     const a = c.authorization_assessments[0];
     root.innerHTML = html`
-      <div class="row"><a class="button subtle sm" href="#/investigations">← All cases</a><h3 style="margin:0">${inc.title}</h3>${tag(STATUS_LABEL[inc.status] || inc.status, kind(inc.status))}<span class="help">${inc.id}</span><a class="button primary sm" id="openSim" href="#/ar-explorer/${inc.id}">Open in Forest Explorer</a></div>
+      <div class="row"><a class="button subtle sm" href="#/investigations">← All cases</a><h3 style="margin:0">${inc.title}</h3>${tag(STATUS_LABEL[inc.status] || inc.status, kind(inc.status))}<span class="help">${inc.id}</span><a class="button primary sm" id="openAr" href="#/ar-navigation/${inc.id}">Open Ranger AR Navigation</a><a class="button subtle sm" id="openSim" href="#/ar-explorer/${inc.id}">Open Forest Simulation</a></div>
       <div class="grid split" style="margin-top:14px">
         <div class="stack">
           <div class="panel"><div class="row"><div class="grow"><h4>Location and imagery evidence</h4></div>${ch && c.observations.length ? raw('<div class="pill-btns" id="imgMode"><button class="on" data-m="geom">Boundary</button><button data-m="cmp">Before / after</button></div>') : ''}</div><div id="map" class="map-box"></div><div id="cmpCtl"></div>
