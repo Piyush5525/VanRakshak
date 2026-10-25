@@ -39,37 +39,42 @@ export async function renderIncident(root, src) {
   let disposed = false, tickAt = 0, statTxt = '';
 
   root.innerHTML = html`
-    <div class="note-box"><span class="mode-chip sim" id="modeChip">Incident simulation mode</span> <b>Simulated forest.</b> ${DISCLAIMER}</div>
-    <div class="grid split" style="margin-top:14px">
-      <div class="panel" style="padding:12px">
-        <div class="ar-stage" id="stage" role="img" aria-label="3D simulated forest inside the incident boundary">
-          <div class="ar-hud"><div class="ar-label" id="lab"></div><div class="ar-card" id="info">Drag to turn, scroll to zoom. Click the ground to inspect a spot.</div></div>
-          <div class="ar-hud" style="top:auto;bottom:12px"><div class="ar-card" id="prog" aria-live="off"></div></div>
+    <div class="fx-head">
+      <div class="fx-title"><span class="mode-chip sim" id="modeChip">Incident simulation mode</span><h2 class="fx-h">${src.title}</h2><div class="fx-sub">${src.typeLabel} · ${src.statusLabel || src.status || 'status unknown'} · opened ${D(src.createdAt)}</div></div>
+      <div class="fx-actions">${raw(src.backHref ? `<a class="button primary sm" href="${esc(src.backHref)}">← ${esc(src.backLabel || 'Back to the incident')}</a>` : '')}<a class="button subtle sm" href="#/ar-explorer">All incidents</a></div>
+    </div>
+    <div class="fx-note"><b>Simulated forest.</b> ${DISCLAIMER}</div><div class="sr-only" id="simStatus" role="status" aria-live="polite"></div>
+    <div class="fx-layout">
+      <section class="fx-main">
+        <div class="ar-stage fx-stage" id="stage" tabindex="0" role="application" aria-label="3D simulated forest inside the incident boundary. Arrow keys turn the view, plus and minus zoom, space plays or pauses.">
+          <div class="ar-hud"><div class="ar-label" id="lab"></div><div class="ar-card" id="info">Drag to turn · scroll to zoom · click the ground to inspect a spot.</div></div>
+          <div class="ar-hud" style="top:auto;bottom:12px"><div class="ar-card fx-prog" id="prog" aria-live="off"></div></div>
+        </div>
+        <div class="fx-controls">
+          <button class="button primary sm" id="play">▶ Play</button><button class="button subtle sm" id="pause" disabled>❚❚ Pause</button><button class="button subtle sm" id="reset">⟲ Reset</button><button class="button subtle sm" id="restart">Restart</button>
+          <input type="range" id="tl" min="0" max="1000" value="0" step="1" class="grow" aria-label="Simulation time"><span class="help fx-time" id="tlLab">0%</span>
+          <label class="help">Speed <select id="spd"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
         </div>
         <div class="sim-legend"><span><i style="background:#2f7d4f"></i>Healthy</span><span><i style="background:#ff7a1a"></i>Burning</span><span><i style="background:#2a2622"></i>Burned</span><span><i style="background:#8a6a45"></i>Cleared</span><span><i class="ln"></i>Incident boundary</span></div>
-        <div class="row" style="margin-top:8px"><input type="range" id="tl" min="0" max="1000" value="0" step="1" class="grow" aria-label="Simulation time"><span class="help" id="tlLab">0%</span></div>
-      </div>
-      <div class="stack">
-        <div class="panel"><h4>Incident</h4><div class="stack" id="incPanel"></div></div>
-        <div class="panel"><h4>Scenario</h4><div class="stack">
-          <label class="f">Simulate<select id="scn">${raw(Object.values(SCENARIOS).map((s) => `<option value="${s.id}" ${s.id === st.scenario ? 'selected' : ''}>${esc(s.label)}</option>`).join(''))}</select></label>
+      </section>
+      <aside class="fx-side">
+        <div class="panel fx-card"><h4>1 · Choose what to simulate</h4><div class="stack">
+          <label class="f">Scenario<select id="scn">${raw(Object.values(SCENARIOS).map((s) => `<option value="${s.id}" ${s.id === st.scenario ? 'selected' : ''}>${esc(s.label)}</option>`).join(''))}</select></label>
           <div class="help" id="scnHelp"></div>
           <div id="windBox" class="grid g2"><label class="f">Wind blows towards<select id="wdir">${raw(WIND_DIRECTIONS.map(([k, d]) => `<option value="${d}" ${d === st.windDeg ? 'selected' : ''}>${k}</option>`).join(''))}</select></label>
             <label class="f">Wind strength<select id="wstr">${raw(Object.keys(WIND_STRENGTH).map((k) => `<option value="${k}" ${k === st.windKey ? 'selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join(''))}</select></label></div>
           <label id="clrBox" class="check" style="display:none"><input type="checkbox" id="clrAfter" checked> Add clearing after the fire</label></div></div>
-        <div class="panel"><h4>Simulation controls</h4><div class="stack">
-          <div class="row"><button class="button primary sm" id="play">Play</button><button class="button subtle sm" id="pause" disabled>Pause</button><button class="button subtle sm" id="reset">Reset</button><button class="button subtle sm" id="restart">Restart</button></div>
-          <div class="row"><label class="help">Speed <select id="spd"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label></div>
-          <div class="help" id="counts" role="status"></div></div></div>
-        <div class="panel"><h4>View</h4><div class="stack"><div class="row"><label><input type="checkbox" id="vTrees" checked> Trees</label><label><input type="checkbox" id="vPerim" checked> Fire perimeter</label><label><input type="checkbox" id="vParts" checked> Smoke and dust</label></div>
-          <div class="row"><button class="button subtle sm" id="cam">Reset camera</button><a class="button subtle sm" href="#/ar-explorer">Region analysis</a>${src.backHref ? raw(`<a class="button subtle sm" href="${esc(src.backHref)}">${esc(src.backLabel || 'Back to the incident')}</a>`) : ''}</div></div></div>
-        <div class="panel"><div class="warn-box"><b>Not real.</b> ${DISCLAIMER}</div></div>
-      </div>
+        <div class="panel fx-card"><h4>2 · What is happening now</h4>
+          <div class="fx-stats"><div class="fx-stat ok"><b id="sH">0</b><span>Healthy</span></div><div class="fx-stat fire"><b id="sB">0</b><span>Burning</span></div><div class="fx-stat ash"><b id="sX">0</b><span>Burned</span></div><div class="fx-stat soil"><b id="sC">0</b><span>Cleared</span></div></div>
+          <div class="help" id="counts" role="status" style="margin-top:8px"></div></div>
+        <div class="panel fx-card"><h4>The incident</h4><div class="stack" id="incPanel"></div></div>
+        <div class="panel fx-card"><h4>View</h4><div class="stack"><div class="row"><label><input type="checkbox" id="vTrees" checked> Trees</label><label><input type="checkbox" id="vPerim" checked> Fire perimeter</label><label><input type="checkbox" id="vParts" checked> Smoke and dust</label></div>
+          <div class="row"><button class="button subtle sm" id="cam">Reset camera</button></div></div></div>
+      </aside>
     </div>`;
 
   $('#incPanel').innerHTML = html`<div class="row"><b class="grow">${src.title}</b>${raw(tag(src.statusLabel || src.status || 'Unknown', 'configure').s)}</div>
-    <dl class="kv"><dt>Type</dt><dd>${src.typeLabel}</dd><dt>Geometry</dt><dd>${GEOM_LABEL[src.geometry?.type] || src.geometry?.type || 'unknown'}</dd><dt>Created</dt><dd>${D(src.createdAt)}</dd><dt>Boundary</dt><dd>${bnd.note}</dd><dt>Area</dt><dd>${bnd.areaHa < 10 ? bnd.areaHa.toFixed(2) : bnd.areaHa.toFixed(1)} ha${bnd.kind === 'synthetic' ? ' (synthetic)' : ''}</dd><dt>Simulated trees</dt><dd>${trees.length.toLocaleString()}</dd></dl>
-    ${raw(bnd.kind === 'synthetic' ? '<div class="help">Synthetic boundary generated from point incident.</div>' : '')}`;
+    <dl class="kv"><dt>Type</dt><dd>${src.typeLabel}</dd><dt>Geometry</dt><dd>${GEOM_LABEL[src.geometry?.type] || src.geometry?.type || 'unknown'}</dd><dt>Created</dt><dd>${D(src.createdAt)}</dd><dt>Boundary</dt><dd>${bnd.note}</dd><dt>Area</dt><dd>${bnd.areaHa < 10 ? bnd.areaHa.toFixed(2) : bnd.areaHa.toFixed(1)} ha${bnd.kind === 'synthetic' ? ' (synthetic)' : ''}</dd><dt>Simulated trees</dt><dd>${trees.length.toLocaleString()}</dd></dl>`;
 
   // ------------------------------------------------------------ three.js scene
   const stage = $('#stage');
@@ -185,7 +190,7 @@ export async function renderIncident(root, src) {
     st.burning = burning; st.clearing = s.cleared;
     $('#prog').textContent = progressText(sim, s, t);
     $('#tl').value = Math.round(t * 1000); $('#tlLab').textContent = Math.round(t * 100) + '%';
-    if (force || time - tickAt > 0.25) { tickAt = time; const txt = `Trees: ${s.healthy.toLocaleString()} healthy · ${s.burning.toLocaleString()} burning · ${s.burned.toLocaleString()} burned · ${s.cleared.toLocaleString()} cleared (all simulated)`; if (txt !== statTxt) { statTxt = txt; $('#counts').textContent = txt; } }
+    if (force || time - tickAt > 0.25) { tickAt = time; $('#sH').textContent = s.healthy.toLocaleString(); $('#sB').textContent = s.burning.toLocaleString(); $('#sX').textContent = s.burned.toLocaleString(); $('#sC').textContent = s.cleared.toLocaleString(); const txt = `Trees: ${s.healthy.toLocaleString()} healthy · ${s.burning.toLocaleString()} burning · ${s.burned.toLocaleString()} burned · ${s.cleared.toLocaleString()} cleared (all simulated)`; if (txt !== statTxt) { statTxt = txt; $('#counts').textContent = txt; } }
     st.dirty = false;
   }
 
@@ -206,7 +211,7 @@ export async function renderIncident(root, src) {
   const treeStateOf = (tr) => out.state[idxOf.get(tr)];
 
   // ------------------------------------------------------------ controls
-  function syncButtons() { $('#play').disabled = st.playing; $('#pause').disabled = !st.playing; }
+  function syncButtons() { $('#play').disabled = st.playing; $('#pause').disabled = !st.playing; const sr = $('#simStatus'); if (sr) sr.textContent = st.playing ? 'Simulation playing' : st.t >= 1 ? 'Simulation finished' : st.t > 0 ? 'Simulation paused' : 'Simulation ready'; }
   const play = () => { if (st.t >= 1) st.t = 0; st.playing = true; syncButtons(); };
   const pause = () => { st.playing = false; syncButtons(); };
   const reset = () => { st.playing = false; st.t = 0; st.dirty = true; [smoke, embers, dust].forEach((e) => e.clear()); syncButtons(); };
@@ -221,6 +226,8 @@ export async function renderIncident(root, src) {
   $('#vPerim').onchange = (e) => { st.perim = e.target.checked; st.dirty = true; };
   $('#vParts').onchange = (e) => { st.parts = e.target.checked; };
   $('#cam').onclick = home;
+  controls.listenToKeyEvents(stage);   // arrow keys turn the view when the scene has focus
+  stage.addEventListener('keydown', (e) => { if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); (st.playing ? pause : play)(); } else if (e.key === '+' || e.key === '=') camera.position.lerp(controls.target, 0.12); else if (e.key === '-') camera.position.lerp(controls.target, -0.12); });
 
   // click the ground to inspect
   const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();

@@ -77,3 +77,31 @@ dialog{border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 3
 .warn-box{border:1px solid #f0d7a8;background:#fff8e8;padding:10px 12px;border-radius:10px;color:#6a4a10;font-size:12.5px;line-height:1.5}
 @media(max-width:700px){.ar-stage{height:380px}}
 .check{display:flex;gap:8px;align-items:center;font-size:13px}
+/* ===== Forest Explorer: roomier, clearer, keyboard friendly ===== */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.fx-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.fx-title{min-width:0}.fx-h{margin:6px 0 2px;font-size:22px;line-height:1.25;overflow-wrap:anywhere}.fx-sub{color:#55685f;font-size:13.5px}
+.fx-actions{display:flex;gap:8px;flex-wrap:wrap}
+.fx-note{border:1px solid #d7e7dd;background:#f1f8f3;padding:12px 14px;border-radius:12px;color:#2f5846;font-size:14px;line-height:1.55}
+.fx-how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}.fx-how div{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid var(--line,#dfe8e2);border-radius:12px;padding:12px 14px;font-size:14px}.fx-how b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#14573c;color:#fff;flex:none}
+.fx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-top:12px}
+.fx-card-link{display:flex;flex-direction:column;gap:5px;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line,#dfe8e2);border-radius:14px;padding:14px 16px;min-height:44px;transition:border-color .15s,box-shadow .15s,transform .15s}
+.fx-card-link:hover{border-color:#6fb18c;box-shadow:0 6px 18px rgba(20,87,60,.12);transform:translateY(-1px)}
+.fx-card-link b{font-size:15px;line-height:1.3;overflow-wrap:anywhere}.fx-card-link span{font-size:13px;color:#55685f}.fx-card-link .fx-meta{font-size:12px}
+.fx-go{margin-top:4px;color:#14573c!important;font-weight:700}
+.fx-kind{align-self:flex-start;font-weight:700;font-size:11px!important;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:#e3efe7;color:#1d4a37!important}
+.fx-kind.fire{background:#ffe4d6;color:#8a2c0a!important}.fx-kind.loss{background:#fdeacb;color:#7a4a00!important}.fx-kind.reported{background:#e1e9f7;color:#244b86!important}
+.fx-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;margin-top:14px;align-items:start}
+.fx-main,.fx-side{min-width:0}.fx-side{display:flex;flex-direction:column;gap:12px}.fx-card{padding:14px 16px}.fx-card h4{margin:0 0 10px;font-size:15px}
+.fx-stage{height:clamp(440px,66vh,740px)!important}
+.fx-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;background:#fff;border:1px solid var(--line,#dfe8e2);border-radius:12px;padding:10px 12px}
+.fx-controls .button{min-height:40px;min-width:44px}.fx-controls input[type=range]{min-width:140px;flex:1 1 160px}.fx-time{min-width:38px;text-align:right}
+.fx-prog{font-weight:700;font-size:13px!important}
+.fx-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.fx-stat{border-radius:12px;padding:10px 6px;text-align:center;background:#f1f6f3}.fx-stat b{display:block;font-size:17px;line-height:1.1;font-variant-numeric:tabular-nums}.fx-stat span{font-size:12px;color:#44584d}
+.fx-stat.ok{background:#e4f2e8}.fx-stat.fire{background:#ffe9d3}.fx-stat.ash{background:#e6e3e0}.fx-stat.soil{background:#f0e6d8}
+.fx-pick .pill-btns button{min-height:40px;padding:0 16px}
+.fx-pick input[type=search]{min-height:42px;border:1px solid var(--line,#cfdcd4);border-radius:10px;padding:0 12px;font:inherit}
+.fx-stage:focus-visible,.fx-card-link:focus-visible,.fx-controls .button:focus-visible,.fx-side select:focus-visible,.fx-side input:focus-visible,.fx-controls input:focus-visible,.fx-controls select:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}
+.fx-side select,.fx-controls select{min-height:40px}
+@media(max-width:1100px){.fx-layout{grid-template-columns:1fr}.fx-how{grid-template-columns:1fr}.fx-stage{height:clamp(360px,56vh,560px)!important}}
+@media(prefers-reduced-motion:reduce){.fx-card-link{transition:none}.fx-card-link:hover{transform:none}}

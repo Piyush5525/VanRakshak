@@ -13,7 +13,9 @@ Open any incident in the **AR Forest Explorer** to see a **simulated** 3D forest
 | Live map, a tree-loss spot | **Open in Forest Explorer** | `/app#/ar-explorer/forest:<id>` |
 | Console, an investigation | **Open in Forest Explorer** | `#/ar-explorer/<incident_id>` |
 
-With no parameter, or with a region id, the page is the existing **Region analysis mode** (real elevation and ESA WorldCover tree cover). With an incident it is **Incident simulation mode**; the mode is shown at the top. An unknown id falls back to the region view.
+**With no parameter** the Forest Explorer opens on a chooser: cards for reported incidents, fire incidents and tree-loss spots (with filters and search), and the monitored regions. With a **region id** it is **Region analysis mode** (real elevation and ESA WorldCover tree cover). With an **incident** it is **Incident simulation mode**; the mode is shown at the top. An unknown id returns to the chooser.
+
+The scene takes keyboard focus: arrow keys turn the view, plus and minus zoom, space plays or pauses; a hidden status line announces play, pause and finish to screen readers.
 
 ## What is built
 

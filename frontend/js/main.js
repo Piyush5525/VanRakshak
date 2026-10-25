@@ -57,16 +57,10 @@ async function route() {
 
 async function health() {
   try {
-    const [h, caps] = await Promise.all([fetch('/health').then((r) => r.json()), api('/system/capabilities')]);
-    $('#healthText').textContent = 'System operational';
-    $('#modeLabel').textContent = h.environment === 'production' ? 'Production mode' : h.environment === 'development' ? 'Development mode · notifications captured' : h.environment;
-    $('#healthChip').classList.remove('bad');
-    const issues = [];
-    if (!caps.features.real_notifications) issues.push('Real notifications are disabled (messages are captured, not sent).');
-    if (issues.length && h.environment !== 'production') { /* informational only: shown on Data Sources */ }
-  } catch {
-    $('#healthText').textContent = 'API unreachable'; $('#healthChip').classList.add('bad');
-  }
+    const h = await fetch('/health').then((r) => r.json());
+    const m = $('#modeLabel');
+    if (m) m.textContent = h.environment === 'production' ? 'Production mode' : h.environment === 'development' ? 'Development mode · notifications captured' : h.environment;
+  } catch { /* the sidebar note is cosmetic */ }
 }
 
 export async function refreshBadges() {
@@ -78,15 +72,6 @@ export async function refreshBadges() {
 
 function init() {
   buildNav();
-  const sel = $('#roleSelect'); sel.value = state.role;
-  sel.addEventListener('change', () => { state.role = sel.value; localStorage.setItem('rk.role', state.role); toast(`Acting as ${sel.options[sel.selectedIndex].text} (development header)`); route(); });
-  $('#tokenBtn').addEventListener('click', () => {
-    const cur = localStorage.getItem('rk.token');
-    const t = prompt(cur ? 'A bearer token is set. Paste a new one, or leave empty to remove it:' : 'Paste a bearer token (needed when the server runs with AUTH_MODE=jwt):', '');
-    if (t === null) return;
-    if (t.trim()) localStorage.setItem('rk.token', t.trim()); else localStorage.removeItem('rk.token');
-    toast(t.trim() ? 'Token saved in this browser' : 'Token removed'); health(); route();
-  });
   $('#menuBtn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
   window.addEventListener('hashchange', route);
   window.addEventListener('rk:changed', refreshBadges);

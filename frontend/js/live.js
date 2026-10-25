@@ -196,7 +196,7 @@ function incDecision(i) {
   if (i.status === 'DISMISSED') body = `<div class="banner2 grey"><b>Marked as a false alarm.</b></div><button class="btn" id="incUndo" ${dis}>↩ Undo, review it again</button>`;
   else if (esc_) body = `<div class="banner2 green"><b>Escalated.</b><div class="sub">Telegram: ${esc(({ SENT: 'sent', FAILED: 'failed', NOT_CONFIGURED: 'not set up' })[esc_.telegram?.status] || '–')} · Phone call: ${esc(({ INITIATED: 'placed', FAILED: 'failed', NOT_CONFIGURED: 'not set up' })[esc_.call?.status] || '–')}</div></div><div class="row2"><button class="btn grow" id="incEsc" ${dis}>🚨 Send again</button><button class="btn" id="incUndo" ${dis}>↩ Undo</button></div>`;
   else body = `<div class="decide"><button class="btn danger-fill" id="incEsc" ${dis}><span>🚨</span><b>Escalate</b><small>Tell the response team on Telegram and phone the response contact</small></button><button class="btn ok-line" id="incFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>`;
-  return `<div class="sect"><h4>Your decision</h4>${body}${can ? '' : `<div class="sub">Your role (${esc(role)}) cannot decide. Switch to Reviewer, Officer or Admin in the full console.</div>`}</div>`;
+  return `<div class="sect"><h4>Your decision</h4>${body}${can ? '' : `<div class="sub">Your role (${esc(role)}) is not allowed to decide.</div>`}</div>`;
 }
 async function escalateIncident(i) {
   const btn = $('#incEsc'); const again = btn.textContent.includes('again');

@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { api, html, raw, esc, fmt, tag, empty, toast, can, $, $$ } from '../core.js';
 import { deviceReport, deviceHtml } from '../device.js';
 import { renderIncident } from './ar-incident.js';
+import { renderHome } from './ar-home.js';
 
 const LAYER_A = 3, LAYER_B = 4; // layers 1/2 are reserved by WebXR for the eyes
 
@@ -36,20 +37,22 @@ export async function resolveIncident(param) {
 }
 
 export async function render(root, { params }) {
-  const regions = await api('/regions');
   const wanted = params[0];
-  if (wanted && !regions.some((r) => r.id === wanted)) {
+  if (!wanted) return renderHome(root);   // the landing page: choose an incident to simulate, or a region to analyse
+  const regions = await api('/regions');
+  if (!regions.some((r) => r.id === wanted)) {
     const inc = await resolveIncident(wanted);
     if (inc) return renderIncident(root, inc);
-    toast('That incident could not be found. Showing the region view instead.', 'error');
+    toast('That incident or region could not be found. Pick one from the list.', 'error');
+    return renderHome(root);
   }
-  if (!regions.length) { root.innerHTML = html`<div class="note-box"><span class="mode-chip">Region analysis mode</span></div>` + empty('No regions yet', 'Create a monitoring region and run change detection to build a scene.', '⬡'); return; }
   const dev = await deviceReport();
   let scene3 = null, S = null, raf = 0, xrSession = null, disposed = false;
   root.innerHTML = html`
-    <div class="note-box"><span class="mode-chip" id="modeChip">Region analysis mode</span> <b>What you are looking at.</b> Terrain is real (Copernicus DEM). Tree density is the ESA WorldCover 2021 reference map. Red areas are <i>candidate</i> loss from stored detections (unverified). Individual trees are <b>simulated markers</b> placed in proportion to that density, not surveyed trees. Anything drawn as a hypothetical clearing is your assumption, not an observation and not a forecast.</div>
+    <div class="fx-head"><div class="fx-title"><span class="mode-chip" id="modeChip">Region analysis mode</span><h2 class="fx-h">Region analysis</h2><div class="fx-sub">Real elevation and tree cover, with stored candidate loss.</div></div><div class="fx-actions"><a class="button subtle sm" href="#/ar-explorer">← All incidents</a></div></div>
+    <div class="fx-note"><b>What you are looking at.</b> Terrain is real (Copernicus DEM). Tree density is the ESA WorldCover 2021 reference map. Red areas are <i>candidate</i> loss from stored detections (unverified). Individual trees are <b>simulated markers</b> placed in proportion to that density, not surveyed trees. Anything drawn as a hypothetical clearing is your assumption, not an observation and not a forecast.</div>
     <div class="grid split" style="margin-top:14px">
-      <div class="panel" style="padding:12px"><div class="ar-stage" id="stage"><div class="ar-hud"><div class="ar-label" id="lab">Loading…</div><div class="ar-card" id="info">Click the terrain to inspect a location.</div></div><div id="hudOverlay" class="ar-hud" style="top:auto;bottom:12px"></div></div>
+      <div class="panel" style="padding:12px"><div class="ar-stage fx-stage" id="stage"><div class="ar-hud"><div class="ar-label" id="lab">Loading…</div><div class="ar-card" id="info">Click the terrain to inspect a location.</div></div><div id="hudOverlay" class="ar-hud" style="top:auto;bottom:12px"></div></div>
         <div class="row" style="margin-top:10px"><button class="button subtle sm" id="play">▶ Play</button><button class="button subtle sm" id="reset">⟲ Reset</button>
           <label class="help">Speed <select id="spd"><option value="0.4">0.5×</option><option value="0.8" selected>1×</option><option value="1.6">2×</option></select></label>
           <input type="range" id="tl" min="0" max="0" value="0" step="1" class="grow" aria-label="Timeline"><span class="help" id="tlLab"></span></div></div>

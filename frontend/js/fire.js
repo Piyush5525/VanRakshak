@@ -162,7 +162,7 @@ function fireDecision(i) {
       <div class="row2"><button class="btn grow" id="fEsc" ${dis}>🚨 Send again</button><button class="btn" id="fResolve" ${dis}>✓ Mark resolved</button></div>`;
   else body = `<div class="decide"><button class="btn danger-fill" id="fEsc" ${dis}><span>🚨</span><b>Escalate</b><small>Confirm the fire, tell the station on Telegram and phone the response contact</small></button>
       <button class="btn ok-line" id="fFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>`;
-  return `<div class="sect"><h4>Your decision</h4>${body}${dis ? `<div class="sub">Your role (${esc(curRole())}) cannot decide. Switch to Reviewer, Officer or Admin in the full console.</div>` : ''}</div>`;
+  return `<div class="sect"><h4>Your decision</h4>${body}${dis ? `<div class="sub">Your role (${esc(curRole())}) is not allowed to decide.</div>` : ''}</div>`;
 }
 async function escalateFire(i0) {
   const btn = $('#fEsc'); const again = btn.textContent.includes('again');

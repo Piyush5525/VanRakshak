@@ -345,7 +345,7 @@ function decisionSection(r) {
       : escd ? `<div class="banner2 green"><b>Escalated.</b><div class="sub">${['telegram', 'ivr'].map((c) => { const h = last(c); return h ? `${c === 'telegram' ? 'Telegram' : 'Phone call'}: ${esc(sendLabel(h.status))}` : ''; }).filter(Boolean).join(' · ') || 'Marked as a real loss.'}</div></div>
         <div class="row2"><button class="btn grow" id="fcEsc" ${dis}>🚨 Send again</button><button class="btn" id="fcUndo" ${dis}>↩ Undo</button></div>`
         : `<div class="decide"><button class="btn danger-fill" id="fcEsc" ${dis}><span>🚨</span><b>Escalate</b><small>Tell the forest office on Telegram and phone the response contact</small></button>
-        <button class="btn ok-line" id="fcFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>${canJudge() ? '' : `<div class="sub">Your role (${esc(role())}) cannot decide. Switch to Reviewer, Officer or Admin in the full console.</div>`}`}</div>`;
+        <button class="btn ok-line" id="fcFalse" ${dis}><span>✓</span><b>False alarm</b><small>Close it. You can undo this</small></button></div>${canJudge() ? '' : `<div class="sub">Your role (${esc(role())}) is not allowed to decide.</div>`}`}</div>`;
 }
 function historySection() {
   if (!S.snaps.length) return '';

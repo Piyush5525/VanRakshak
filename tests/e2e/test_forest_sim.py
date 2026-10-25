@@ -157,10 +157,32 @@ def test_region_mode_still_loads_with_its_own_mode_label(sim_server, browser):  
     assert page.inner_text("#modeChip").lower() == "region analysis mode"
     assert page.locator("#tl").count() == 1 and page.locator("#reg").count() == 1 and page.locator("#place").count() == 1
     page.wait_for_function("document.querySelector('#loadMsg').innerText.includes('simulated tree markers')", timeout=30000)
-    # the page without a parameter is the same region view
-    page.goto(sim_server["base"] + "/app#/ar-explorer")
-    page.wait_for_selector("#reg")
-    assert page.inner_text("#modeChip").lower() == "region analysis mode"
+    ctx.close()
+
+
+def test_the_explorer_opens_on_a_chooser_of_incidents_and_regions(sim_server, browser):  # noqa: F811
+    ctx, page, problems = page_for(browser)
+    page.goto(sim_server["base"] + "/app#/ar-explorer", wait_until="load")
+    page.wait_for_selector("#fxList a.fx-card-link")
+    t = page.inner_text("#view")
+    assert "Cutting at the test ridge" in t and "Fire seen near the test village" in t and "Test region" in t and "simulated" in t.lower()
+    assert page.locator("#canvas, #stage canvas").count() == 0            # no 3D scene until something is chosen
+    page.fill("#fxQ", "ridge")
+    assert page.locator("#fxList a.fx-card-link").count() == 1
+    page.fill("#fxQ", "")
+    page.click('#fxGroups button[data-g="fire"]')
+    assert page.locator("#fxList a.fx-card-link").count() == 1 and page.get_attribute('#fxGroups button[data-g="fire"]', "aria-pressed") == "true"
+    page.click("#fxList a.fx-card-link")
+    page.wait_for_selector("#stage canvas", timeout=60000)
+    assert page.inner_text("#modeChip").lower() == "incident simulation mode" and page.input_value("#scn") == "fire"
+    page.click("text=All incidents")
+    page.wait_for_selector("#fxList")
+    # keyboard: the scene takes focus and space plays
+    page.click('#fxList a.fx-card-link >> nth=0'); page.wait_for_selector("#stage canvas")
+    page.focus("#stage"); page.keyboard.press("Space")
+    assert page.is_disabled("#play")
+    page.keyboard.press("Space")
+    assert not page.is_disabled("#play")
     ctx.close()
 
 
@@ -175,10 +197,9 @@ def test_no_horizontal_overflow_in_the_simulation_layout(sim_server, browser, wi
     ctx.close()
 
 
-def test_an_unknown_incident_falls_back_to_the_region_view(sim_server, browser):  # noqa: F811
+def test_an_unknown_incident_falls_back_to_the_chooser(sim_server, browser):  # noqa: F811
     ctx, page, problems = page_for(browser)
-    page.route("**/api/v1/ar/forest-scenes/*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(SCENE)))
     page.goto(sim_server["base"] + "/app#/ar-explorer/not-a-real-incident", wait_until="load")
-    page.wait_for_selector("#modeChip")
-    assert page.inner_text("#modeChip").lower() == "region analysis mode"
+    page.wait_for_selector("#fxList")
+    assert page.locator("#modeChip").inner_text().lower() == "forest explorer"
     ctx.close()
