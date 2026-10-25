@@ -226,6 +226,7 @@ async function showDetail(id) {
     <div class="row-item" style="border:0;padding:0"><span style="font-size:26px">${em}</span><span class="grow"><h2 style="font-size:17px">${i.title}</h2><div class="sub">${kn} · ${ago(new Date(i.created_at).getTime())}</div></span></div>
     <div style="margin:8px 0"><span class="chip ${c}">${st}</span> <span class="sub">${ll[0].toFixed(4)}, ${ll[1].toFixed(4)}</span></div>
     
+    <div class="sect simlink"><h4>🧊 3D simulation</h4><div class="sub">Walk through a simulated forest, fire or clearing inside this incident's boundary. It is invented, not real mapping or a forecast.</div><a class="btn primary" id="sim3d" href="/app#/ar-explorer/${encodeURIComponent(i.id)}" style="margin-top:8px;text-align:center;display:block">Open in Forest Explorer</a></div>
     ${raw(incDecision(i))}
     <div class="sect"><h4>🔥 Fires nearby</h4>${raw(!fireMeta ? '<span class="sub">Fire data is not loaded.</span>' : near.length ? `<b>${near.length}</b> hotspot${near.length > 1 ? 's' : ''} within 10 km in the last ${fireDays * 24} h. Nearest: ${near[0].d.toFixed(1)} km${near[0].f[4] != null ? `, ${esc(near[0].f[4])} MW` : ''}.` : `None within 10 km in the last ${fireDays * 24} h.`)}</div>
     <div class="sect"><h4>🏭 Factory and emissions</h4><div id="siteBox">${raw(siteHtml(site))}</div>

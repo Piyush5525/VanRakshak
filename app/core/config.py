@@ -27,6 +27,8 @@ from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
 from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -100,6 +102,20 @@ class Settings(BaseSettings):
     @classmethod
     def _blank_is_unset(cls, v):
         return None if isinstance(v, str) and not v.strip() else v
+
+    @model_validator(mode="after")
+    def _pick_voice_provider(self):
+        # an OmniDimension key + agent in .env is enough to turn real calling on; IVR_PROVIDER can still override it
+        if self.ivr_provider == "simulated" and self.omnidim_api_key and self.omnidim_agent_id:
+            self.ivr_provider = "omnidimension"
+        return self
+
+    @model_validator(mode="after")
+    def _pick_voice_provider(self):
+        # an OmniDimension key + agent in .env is enough to turn real calling on; IVR_PROVIDER can still override it
+        if self.ivr_provider == "simulated" and self.omnidim_api_key and self.omnidim_agent_id:
+            self.ivr_provider = "omnidimension"
+        return self
 
     @model_validator(mode="after")
     def _pick_voice_provider(self):

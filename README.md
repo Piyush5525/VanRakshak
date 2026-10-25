@@ -110,6 +110,12 @@ Each change, and the whole check, has a report with the pictures, the impact and
 |---|---|
 | ![Report for one change](docs/images/infra-report-page.png) | ![Report for the whole check](docs/images/infra-run-report-page.png) |
 
+### 3D simulation of an incident
+
+Every incident (a reported incident, a fire, or a tree-loss spot) has an **Open in Forest Explorer** button. It opens a **simulated** 3D forest inside the incident's exact boundary, where you can play a deforestation, a fire-spread (with wind) or a combined scenario. It is clearly labelled as invented: not real mapping, not satellite evidence, not a forecast. Details: [docs/FOREST_SIMULATION.md](docs/FOREST_SIMULATION.md).
+
+![A simulated fire spreading through a simulated forest inside an incident boundary](docs/images/forest-simulation-fire.png)
+
 ### One decision: Escalate or False alarm
 
 ```mermaid
@@ -220,4 +226,4 @@ Tests use a temporary database, blank every provider key and switch the public r
 
 ## Docs
 
-[Forest change](docs/FOREST_CHANGE.md) · [New construction](docs/INFRA_CHANGE.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)
+[Forest change](docs/FOREST_CHANGE.md) · [New construction](docs/INFRA_CHANGE.md) · [3D simulation](docs/FOREST_SIMULATION.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)

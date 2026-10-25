@@ -387,6 +387,7 @@ function paintRecord(box, r) {
     ${raw(permitSection(r))}
     ${raw(decisionSection(r))}
     ${raw(historySection())}
+    <div class="sect"><h4>3D simulation</h4><div class="sub">A simulated forest inside this spot's exact boundary: clearing, fire or both. Invented, not evidence.</div><a class="btn primary" id="sim3d" href="/app#/ar-explorer/forest:${r.id}" style="margin-top:8px;text-align:center;display:block">Open in Forest Explorer</a></div>
     <div class="sect"><h4>Report</h4><div class="sub">Everything about this spot in one file: live satellite pictures, map, routes and clickable links.</div><div class="row2" style="margin-top:8px"><button class="btn grow" id="fcView">👁 View report</button><button class="btn primary grow" id="fcPdf">⬇ Download</button></div></div>
     <details class="more"><summary>More</summary><div class="row2" style="margin-top:8px"><button class="btn sm" id="fcGeo">⬇ Export GeoJSON</button><button class="btn sm danger" id="fcDel">− Remove this spot</button></div></details>`;
   $('#fcBack', box).onclick = () => { S.sel = null; clearInterval(S.evPoll); if (!S.fromCell) S.cell = null; S.fromCell = false; drawEverything(); if (S.cell) selectCell(S.cell); };

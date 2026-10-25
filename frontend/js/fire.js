@@ -117,6 +117,7 @@ function paintDetail(box) {
   const tabs = [['overview', 'Overview'], ['forecast', 'Forecast'], ['impact', 'Impact'], ['route', 'Route'], ['comms', 'Messages']];
   box.innerHTML = html`<button class="back" id="fireBack">‹ All fire incidents</button>
     <div class="row-item" style="border:0;padding:0"><span style="font-size:24px">🔥</span><span class="grow"><h2 style="font-size:17px">${i.detection?.place?.name || i.code}</h2><div class="sub">${i.code} · ${i.lat.toFixed(4)}, ${i.lon.toFixed(4)} ${raw(i.is_demo ? '<span class="tag">Scenario</span>' : '')}</div></span><span class="chip ${STATUS_CHIP[i.status] || ''}">${i.status_label}</span></div>
+    <div class="row2" style="margin:8px 0"><a class="btn sm primary" id="sim3d" href="/app#/ar-explorer/fire:${encodeURIComponent(i.id)}">🧊 3D simulation · Open in Forest Explorer</a></div>
     <div class="sub-tabs" id="stabs">${raw(tabs.map(([k, n]) => `<button data-k="${k}" class="${S.tab === k ? 'on' : ''}">${n}</button>`).join(''))}</div>
     <div id="pane"></div>`;
   $('#fireBack').onclick = () => { S.sel = null; drawPins(); paint(); };

@@ -4,18 +4,50 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { api, html, raw, esc, fmt, tag, empty, toast, can, $, $$ } from '../core.js';
 import { deviceReport, deviceHtml } from '../device.js';
+import { renderIncident } from './ar-incident.js';
 
 const LAYER_A = 3, LAYER_B = 4; // layers 1/2 are reserved by WebXR for the eyes
 
 const rng = (seed) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
 
+const nice = (v) => String(v || 'unknown').replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+const KINDS = { cutting: 'Illegal cutting', fire: 'Forest fire', encroachment: 'Encroachment', pollution: 'Industrial pollution', other: 'Other' };
+
+/**
+ * An incident the Forest Explorer can simulate, from a link of the form #/ar-explorer/<id>.
+ * <id> is a reported incident. "fire:<id>" is a satellite fire incident and "forest:<id>" is a tree-loss spot from the live map.
+ * Returns null when the parameter is not an incident we can find.
+ */
+export async function resolveIncident(param) {
+  const p = decodeURIComponent(param || ''), m = p.match(/^(fire|forest):(.+)$/), id = m ? m[2] : p;
+  try {
+    if (m?.[1] === 'fire') {
+      const i = await api('/fire/incidents/' + encodeURIComponent(id)), place = i.detection?.place?.name;
+      return { source: 'fire', id: 'fire:' + i.id, title: `${i.code}${place ? ' · ' + place : ''}`, status: i.status, statusLabel: i.status_label, typeLabel: 'Wildfire (satellite hotspot)', createdAt: i.created_at, geometry: { type: 'Point', coordinates: [i.lon, i.lat] }, defaultScenario: 'fire', backHref: '/live', backLabel: 'Back to the live map' };
+    }
+    if (m?.[1] === 'forest') {
+      const r = await api('/forest-change/records/' + encodeURIComponent(id));
+      return { source: 'forest', id: 'forest:' + r.id, title: `${r.code} · ${r.area_ha} ha of tree loss`, status: r.status, statusLabel: nice(r.status), typeLabel: 'Tree loss (satellite candidate)', createdAt: r.created_at, geometry: r.geometry, defaultScenario: 'deforestation', backHref: '/live', backLabel: 'Back to the live map' };
+    }
+    const i = await api('/incidents/' + encodeURIComponent(id));
+    const kind = i.evidence?.kind, type = KINDS[kind] || (i.change_id ? 'Satellite change' : i.wildfire_id ? 'Forest fire' : 'Other');
+    return { source: 'incident', id: i.id, title: i.title, status: i.status, statusLabel: nice(i.status), typeLabel: type, createdAt: i.created_at, geometry: i.geometry, defaultScenario: kind === 'fire' || i.wildfire_id ? 'fire' : 'deforestation', backHref: '#/investigations/' + i.id, backLabel: 'Back to the case' };
+  } catch (e) { return null; }
+}
+
 export async function render(root, { params }) {
   const regions = await api('/regions');
-  if (!regions.length) { root.innerHTML = empty('No regions yet', 'Create a monitoring region and run change detection to build a scene.', '⬡'); return; }
+  const wanted = params[0];
+  if (wanted && !regions.some((r) => r.id === wanted)) {
+    const inc = await resolveIncident(wanted);
+    if (inc) return renderIncident(root, inc);
+    toast('That incident could not be found. Showing the region view instead.', 'error');
+  }
+  if (!regions.length) { root.innerHTML = html`<div class="note-box"><span class="mode-chip">Region analysis mode</span></div>` + empty('No regions yet', 'Create a monitoring region and run change detection to build a scene.', '⬡'); return; }
   const dev = await deviceReport();
   let scene3 = null, S = null, raf = 0, xrSession = null, disposed = false;
   root.innerHTML = html`
-    <div class="note-box"><b>What you are looking at.</b> Terrain is real (Copernicus DEM). Tree density is the ESA WorldCover 2021 reference map. Red areas are <i>candidate</i> loss from stored detections (unverified). Individual trees are <b>simulated markers</b> placed in proportion to that density, not surveyed trees. Anything drawn as a hypothetical clearing is your assumption, not an observation and not a forecast.</div>
+    <div class="note-box"><span class="mode-chip" id="modeChip">Region analysis mode</span> <b>What you are looking at.</b> Terrain is real (Copernicus DEM). Tree density is the ESA WorldCover 2021 reference map. Red areas are <i>candidate</i> loss from stored detections (unverified). Individual trees are <b>simulated markers</b> placed in proportion to that density, not surveyed trees. Anything drawn as a hypothetical clearing is your assumption, not an observation and not a forecast.</div>
     <div class="grid split" style="margin-top:14px">
       <div class="panel" style="padding:12px"><div class="ar-stage" id="stage"><div class="ar-hud"><div class="ar-label" id="lab">Loading…</div><div class="ar-card" id="info">Click the terrain to inspect a location.</div></div><div id="hudOverlay" class="ar-hud" style="top:auto;bottom:12px"></div></div>
         <div class="row" style="margin-top:10px"><button class="button subtle sm" id="play">▶ Play</button><button class="button subtle sm" id="reset">⟲ Reset</button>
