@@ -35,6 +35,7 @@
     <label class="layer" title="Dots where NASA satellites see heat"><input type="checkbox" id="showFires"><i class="sw"></i><span>🔥 Fire hotspots</span></label>
     <label class="layer" title="Where hotspots cluster"><input type="checkbox" id="showHeat"><i class="sw"></i><span>🌡 Heat zones</span></label>
     <label class="layer" title="Areas you have checked, 90 days to today"><input type="checkbox" id="showCover"><i class="sw"></i><span>🌲 Tree cover</span></label>
+    <label class="layer" title="New roads, buildings and other construction in the last 365 days"><input type="checkbox" id="showInfra"><i class="sw"></i><span>🏗 New construction</span></label>
     <div id="fireInfo" hidden>
       <div class="big"><b id="fireCount">–</b><span id="fireLabel">hotspots</span></div>
       <div class="sub" id="fireSub"></div>
@@ -50,8 +51,8 @@
 
   <aside class="side right card" id="right" aria-label="Incidents">
     <button class="collapse" data-for="right" aria-label="Hide panel">›</button>
-    <div class="tabs2" id="rtabs" role="tablist"><button data-t="tree" class="on" role="tab">🌲 Trees</button><button data-t="fire" role="tab">🔥 Fire</button><button data-t="inc" role="tab">📍 Reports</button></div>
-    <div id="forestBody"></div><div id="rightBody" hidden></div><div id="fireBody" hidden></div>
+    <div class="tabs2" id="rtabs" role="tablist"><button data-t="tree" class="on" role="tab">🌲 Trees</button><button data-t="fire" role="tab">🔥 Fire</button><button data-t="infra" role="tab">🏗 Built</button><button data-t="inc" role="tab">📍 Reports</button></div>
+    <div id="forestBody"></div><div id="infraBody" hidden></div><div id="rightBody" hidden></div><div id="fireBody" hidden></div>
   </aside>
 
   <button class="tab tab-left" data-for="left" aria-label="Show layers panel">☰ Layers</button>

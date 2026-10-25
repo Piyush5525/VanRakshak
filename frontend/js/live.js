@@ -3,6 +3,7 @@ import { api, esc, html, raw, toast, fmt, download, state } from './core.js';
 import { config } from './map.js';
 import * as FIRE from './fire.js';
 import * as FOREST from './forest.js';
+import * as INFRA from './infra.js';
 import * as CASES from './cases.js';
 import { pop } from './progress.js';
 import { followCall } from './escalate.js';
@@ -120,6 +121,7 @@ async function syncFireLayers() {
   if (anyFireLayer() && !fireMeta) await loadFires(); else drawFires();
 }
 $('#showFires').onchange = syncFireLayers; $('#showHeat').onchange = syncFireLayers;
+$('#showInfra').onchange = (e) => window.dispatchEvent(new CustomEvent('rk:infra-layer', { detail: { on: e.target.checked } }));
 $('#showCover').onchange = (e) => window.dispatchEvent(new CustomEvent('rk:layers', { detail: { cover: e.target.checked } }));
 $('#refresh').onclick = () => loadFires(true); $('#src').onchange = () => loadFires();
 setInterval(() => { if (anyFireLayer()) loadFires(); }, 10 * 60 * 1000);
@@ -285,6 +287,7 @@ loadIncidents().then(paintList);
 window.rkMap = map;   // handy for tests and debugging
 FIRE.init({ map });
 FOREST.init({ map });
+INFRA.init({ map });
 CASES.init({ map });
 FACTORY.init({ map });
 SEARCH.init({ map });

@@ -21,7 +21,7 @@ export function init(ctx) {
 }
 export function switchTab(t) {
   $$('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
-  $('#rightBody').hidden = t !== 'inc'; $('#fireBody').hidden = t !== 'fire'; $('#forestBody').hidden = t !== 'tree';
+  $('#rightBody').hidden = t !== 'inc'; $('#fireBody').hidden = t !== 'fire'; $('#forestBody').hidden = t !== 'tree'; if ($('#infraBody')) $('#infraBody').hidden = t !== 'infra';
   window.dispatchEvent(new CustomEvent('rk:tab', { detail: t }));
   if (t === 'fire') { paint(); } else { S.layer.clearLayers(); }
 }

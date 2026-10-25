@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS infra_runs (id TEXT PRIMARY KEY, name TEXT, status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0, bbox TEXT NOT NULL, geometry TEXT, params TEXT, result TEXT, created_by TEXT, created_at TEXT NOT NULL, finished_at TEXT);
+CREATE TABLE IF NOT EXISTS infra_changes (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, code TEXT NOT NULL, cls TEXT NOT NULL, cls_source TEXT, name TEXT, geometry TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, area_ha REAL NOT NULL, evidence TEXT, impact TEXT, status TEXT NOT NULL DEFAULT 'OPEN', note TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_infra_changes_run ON infra_changes(run_id);

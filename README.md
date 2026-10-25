@@ -94,6 +94,22 @@ Every route is split into 🚗 **road** and 🚶 **on foot** parts, so a forest 
 
 The permit box answers one question: **Government approved** or **Not government approved** (against the permits loaded or entered in the system; no live government permit API exists).
 
+### New construction: what was built in the last 365 days
+
+Switch on **🏗 New construction** (or open the **🏗 Built** tab). Pick a ready-made Jaipur area or draw your own patch anywhere in India, and VanRakshak compares real Sentinel-2 pictures from a year ago and now. Every new road, highway, building, industrial area, construction site, quarry or cleared plot is drawn as a polygon, coloured by type, with its impact, a drag-to-compare before / after picture, and a PDF report for each change and for the whole check. A detection you do not believe can be set aside and put back. Details: [docs/INFRA_CHANGE.md](docs/INFRA_CHANGE.md).
+
+![New construction found around Jagatpura, Jaipur, coloured by type](docs/images/infra-built-list.png)
+
+Open any change to drag between **a year ago** and **now**. This 25 ha patch was dense greenery in October 2025 and is a cleared, laid-out plot in October 2026:
+
+![Before and after of a 25 ha change, with its measured impact](docs/images/infra-compare.png)
+
+Each change, and the whole check, has a report with the pictures, the impact and clickable map links:
+
+| One change | The whole check |
+|---|---|
+| ![Report for one change](docs/images/infra-report-page.png) | ![Report for the whole check](docs/images/infra-run-report-page.png) |
+
 ### One decision: Escalate or False alarm
 
 ```mermaid
@@ -204,4 +220,4 @@ Tests use a temporary database, blank every provider key and switch the public r
 
 ## Docs
 
-[Forest change](docs/FOREST_CHANGE.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)
+[Forest change](docs/FOREST_CHANGE.md) · [New construction](docs/INFRA_CHANGE.md) · [Fire response](docs/FIRE_RESPONSE.md) · [Factory check](docs/FACTORY_CHECK.md) · [Monthly alerts](docs/MONTHLY_ALERTS.md) · [Architecture](docs/ARCHITECTURE.md) · [API reference](docs/API_REFERENCE.md) · [AR](docs/AR.md) · [Data sources](docs/DATA_SOURCES.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Limitations](docs/LIMITATIONS.md)

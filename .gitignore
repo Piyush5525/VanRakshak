@@ -16,3 +16,5 @@ data/server.log
 data/fire_out/
 data/*.geojson
 .pytest_cache/
+
+data/infra/

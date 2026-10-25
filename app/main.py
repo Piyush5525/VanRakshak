@@ -41,6 +41,7 @@ from app.services.wildfire import FirmsUnavailable, fetch_firms, store_detection
 from app.services.satellite import AcquisitionConfig
 from app.fire_routes import api as fire_api
 from app.forest_routes import api as forest_api
+from app.infra_routes import api as infra_api
 from app.factory_routes import api as factory_api
 from app.live_routes import api as live_api
 from app.rakshak_routes import api as rakshak_api
@@ -61,7 +62,7 @@ try:
 
     with _conn() as _c:
         _msg = '{"steps": [], "error": "Interrupted by a server restart. Please run it again."}'
-        for _t in ("fc_runs", "alert_runs"):
+        for _t in ("fc_runs", "alert_runs", "infra_runs"):
             _c.execute(f"UPDATE {_t} SET status = 'FAILED', result = ? WHERE status IN ('QUEUED', 'RUNNING')", (_msg,))
         _c.execute("UPDATE jobs SET status = 'failed', error = ? WHERE status IN ('queued', 'running')", ('{"type": "Interrupted", "message": "Interrupted by a server restart"}',))
         _c.execute("UPDATE factory_checks SET status = 'FAILED', result = ? WHERE status = 'RUNNING'", ('{"status": "failed", "reason": "Interrupted by a server restart. Please run it again."}',))
@@ -95,6 +96,7 @@ app.include_router(rakshak_api)
 app.include_router(live_api)
 app.include_router(fire_api)
 app.include_router(forest_api)
+app.include_router(infra_api)
 app.include_router(factory_api)
 app.include_router(replanting_api)
 app.add_middleware(RequestContextMiddleware, per_minute=settings.rate_limit_per_minute)

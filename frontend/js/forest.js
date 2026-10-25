@@ -21,6 +21,7 @@ export function init({ map }) {
   map.createPane('cover'); map.getPane('cover').style.zIndex = 330;
   map.on('moveend', drawArea);
   map.on('draw:created', (e) => {
+    if (!S.drawing) return;   // another panel may be drawing
     const g = e.layer.toGeoJSON().geometry; S.drawing = false; S.drawKind = null; S.drawer = null;
     S.drawn = g; const k = drawnKm2();
     if (!(k >= 0.02)) { S.drawn = null; toast('That shape is too small. Draw a larger one.', 'error'); }   // a click without a drag is not an area

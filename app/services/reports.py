@@ -253,6 +253,12 @@ def generic_pdf(title: str, subtitle: str, blocks: list[tuple[str, Any]], summar
                 part.append(t)
             else:
                 part.append(para("Nothing recorded.", small))
+        elif isinstance(content, (bytes, bytearray)):   # a picture placed inside the section
+            try:
+                im = Image.open(io.BytesIO(content))
+                part.append(RLImage(io.BytesIO(content), width=W, height=W * im.height / im.width))
+            except Exception:  # noqa: BLE001
+                part.append(para("The picture could not be shown.", small))
         elif isinstance(content, list):
             part += [para("•  " + _flat(x)) for x in content] or [para("None.", small)]
         else:
